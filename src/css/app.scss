@@ -1,0 +1,16 @@
+// app global css in SCSS form
+@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
+#vue-overlay { font-family: "Atkinson Hyperlegible", sans-serif; }
+
+.q-splitter__separator {pointer-events: auto;  padding:2px; background:#18181811 }
+.q-splitter__separator:hover,.q-splitter__separator:active {pointer-events: auto; margin:-2px; padding:4px}
+.q-splitter__separator:active {background:#fffc; border-radius:4px;}
+.scene-tree  {text-shadow: 1px 1px 5px black;}
+.se_panel_root {background:#222222aa; padding:4px; pointer-events:auto; backdrop-filter:blur(5px)}
+.se_panel {border-radius:10px; background:#ffffff22}
+.prop-container { flex: 1; display: flex; }
+.icon-tabs { color:white;  border-right: 4px solid #99999955; }
+.tab-content {flex: 1; padding: 12px; overflow-y: auto; }
+.children { padding-left: 16px; }
+.tree-node.drag-over { outline: 2px dashed #1890ff; }
