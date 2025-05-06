@@ -1,16 +1,34 @@
-import { ShaderStore, PostProcess, PassPostProcess,  Vector2, MeshBuilder, ShaderLanguage, StorageBuffer, ActionManager} from "@babylonjs/core"
-import { MAX_BYTECODE_LENGTH, HW_SCALING } from "./defaults"
-import { generateWGSL } from "./sd-scene-shader-representation";
+import {
+  ShaderStore,
+  PostProcess,
+  PassPostProcess,
+  Vector2,
+  MeshBuilder,
+  ShaderLanguage,
+  StorageBuffer,
+  ActionManager,
+  Constants,
+} from '@babylonjs/core'
+import { MAX_BYTECODE_LENGTH } from './defaults'
+import { generateWGSL } from './sd-scene-shader-representation'
+import { watch, toRef } from 'vue'
 // TERMS:
 // SDFSceneInstance
 // SDFSceneJSON
 // SDFSceneBabylonAdapter
 // SDFSceneShaderOutputs
 
-export function setupRaymarchingPp(scene, camera, lightDir, sdSceneRepresentation) {
-    const engine = scene.getEngine()
-    const shader_output = generateWGSL(sdSceneRepresentation)
-    ShaderStore.ShadersStoreWGSL["raymarchFragmentShader"] = `
+export function setupRaymarchingPp(
+  scene,
+  camera,
+  lightDir,
+  sdSceneRepresentation,
+  global_settings,
+  state,
+) {
+  const engine = scene.getEngine()
+  const shader_output = generateWGSL(sdSceneRepresentation)
+  ShaderStore.ShadersStoreWGSL['raymarchFragmentShader'] = `
         uniform iResolution : vec2<f32>;
         var SceneTexture: texture_2d<f32>;
         var SceneTextureSampler: sampler;
@@ -98,85 +116,81 @@ export function setupRaymarchingPp(scene, camera, lightDir, sdSceneRepresentatio
     //////////////////////////////////////////////
     // Translate - exact
     
-    fn opSmoothSubtract(d1: f32, d2: f32, k: f32) -> f32 {
-      let h = clamp(0.5 - 0.5 * (d1 + d2) / k, 0., 1.);
-      return mix(d1, -d2, h) + k * h * (1. - h);
-    }
-    fn test(p: vec3<f32>) -> f32 {
-        return opSmoothSubtract(
-            /* subtract “notch” */
-            opSmoothUnion(
-                /* chamfer‑union of trunk and canopy */
+    // fn test(p: vec3<f32>) -> f32 {
+    //     return opSmoothSubtract(
+    //         /* subtract “notch” */
+    //         opSmoothUnion(
+    //             /* chamfer‑union of trunk and canopy */
     
-                /* — trunk (smooth blend of three parts) — */
-                opSmoothUnion(
-                    opSmoothUnion(
-                        /* part 1: rounded box */
-                        sdRoundBox(
-                            opTranslate(p, vec3<f32>(0.0, -0.5, 0.0)),
-                            vec3<f32>(3.0, 0.2, 3.0),
-                            0.5
-                        ),
-                        /* part 2: small sphere */
-                        sdSphere(
-                            opTranslate(p, vec3<f32>(0.0, 0.3, 0.0)),
-                            0.3
-                        ),
-                        0.3
-                    ),
-                    /* part 3: small sphere higher up */
-                    sdSphere(
-                        opTranslate(p, vec3<f32>(0.0, 0.7, 0.0)),
-                        0.25
-                    ),
-                    0.3
-                ),
+    //             /* — trunk (smooth blend of three parts) — */
+    //             opSmoothUnion(
+    //                 opSmoothUnion(
+    //                     /* part 1: rounded box */
+    //                     sdRoundBox(
+    //                         opTranslate(p, vec3<f32>(0.0, -0.5, 0.0)),
+    //                         vec3<f32>(3.0, 0.2, 3.0),
+    //                         0.5
+    //                     ),
+    //                     /* part 2: small sphere */
+    //                     sdSphere(
+    //                         opTranslate(p, vec3<f32>(0.0, 0.3, 0.0)),
+    //                         0.3
+    //                     ),
+    //                     0.3
+    //                 ),
+    //                 /* part 3: small sphere higher up */
+    //                 sdSphere(
+    //                     opTranslate(p, vec3<f32>(0.0, 0.7, 0.0)),
+    //                     0.25
+    //                 ),
+    //                 0.3
+    //             ),
     
-                /* — canopy (smooth blend of four spheres) — */
-                opSmoothUnion(
-                    opSmoothUnion(
-                        opSmoothUnion(
-                            /* canopy sphere 1 */
-                            sdSphere(
-                                opTranslate(p, vec3<f32>(0.0, 1.2, 0.0)),
-                                0.4
-                            ),
-                            /* canopy sphere 2 */
-                            sdSphere(
-                                opTranslate(p, vec3<f32>(0.4, 1.3, 0.0)),
-                                0.35
-                            ),
-                            0.4
-                        ),
-                        /* canopy sphere 3 */
-                        sdSphere(
-                            opTranslate(p, vec3<f32>(-0.4, 1.3, 0.0)),
-                            0.25
-                        ),
-                        0.4
-                    ),
-                    /* canopy sphere 4 */
-                    sdSphere(
-                        opTranslate(p, vec3<f32>(0.0, 1.5, 0.4)),
-                        0.3
-                    ),
-                    0.4
-                ),
+    //             /* — canopy (smooth blend of four spheres) — */
+    //             opSmoothUnion(
+    //                 opSmoothUnion(
+    //                     opSmoothUnion(
+    //                         /* canopy sphere 1 */
+    //                         sdSphere(
+    //                             opTranslate(p, vec3<f32>(0.0, 1.2, 0.0)),
+    //                             0.4
+    //                         ),
+    //                         /* canopy sphere 2 */
+    //                         sdSphere(
+    //                             opTranslate(p, vec3<f32>(0.4, 1.3, 0.0)),
+    //                             0.35
+    //                         ),
+    //                         0.4
+    //                     ),
+    //                     /* canopy sphere 3 */
+    //                     sdSphere(
+    //                         opTranslate(p, vec3<f32>(-0.4, 1.3, 0.0)),
+    //                         0.25
+    //                     ),
+    //                     0.4
+    //                 ),
+    //                 /* canopy sphere 4 */
+    //                 sdSphere(
+    //                     opTranslate(p, vec3<f32>(0.0, 1.5, 0.4)),
+    //                     0.3
+    //                 ),
+    //                 0.4
+    //             ),
     
-                /* chamfer radius = 0 */
-                0.0
-            ),
+    //             /* chamfer radius = 0 */
+    //             0.0
+    //         ),
     
-            /* notch sphere to subtract */
-            sdSphere(
-                opTranslate(p, vec3<f32>(0.0, 1.2, 0.3)),
-                0.1
-            ),
+    //         /* notch sphere to subtract */
+    //         sdSphere(
+    //             opTranslate(p, vec3<f32>(0.0, 1.2, 0.3)),
+    //             0.1
+    //         ),
     
-            /* smooth‑subtract blend factor k */
-            0.15
-        );
-    }
+    //         /* smooth‑subtract blend factor k */
+    //         0.15
+    //     );
+    // }
     
     
     // Use the distance-only evaluation for marching.
@@ -199,7 +213,7 @@ export function setupRaymarchingPp(scene, camera, lightDir, sdSceneRepresentatio
     fn raymarch(origin: vec3<f32>, dir: vec3<f32>) -> RayHit {
         var totalDistance = 0.0;
         let MAX_DISTANCE = 30.0;
-        let MAX_STEPS = 50;
+        let MAX_STEPS = 200;
         var pos: vec3<f32> = origin;
         var hit: bool = false;
         
@@ -303,10 +317,9 @@ export function setupRaymarchingPp(scene, camera, lightDir, sdSceneRepresentatio
         return fragmentOutputs;
     }
     
-    `;
-    
-    
-    ShaderStore.ShadersStoreWGSL["compositeFragmentShader"] = `
+    `
+
+  ShaderStore.ShadersStoreWGSL['compositeFragmentShader'] = `
         uniform iResolution : vec2<f32>;
         var<storage,read_write> raymarch_depth_out_buffer : array<f32>;
         var DepthMapTexture: texture_2d<f32>;
@@ -366,142 +379,190 @@ export function setupRaymarchingPp(scene, camera, lightDir, sdSceneRepresentatio
         return FragmentOutputs(outColor);
     }
     
-    `;
-    
-        const rayBox = MeshBuilder.CreateBox('rayBox', { size: 4 });
-        rayBox.position.y = 2;
-        rayBox.visibility = 0;
-        rayBox.isVisible = false
-    
-        var depth_renderer, depth_texture
-        const handleResize = () => {
-    
-    
-            scene.disableDepthRenderer();
-            depth_renderer = scene.enableDepthRenderer(camera, undefined, undefined, undefined, true);
-            depth_texture = depth_renderer.getDepthMap();
-    
-        };
-    
-        scene.getEngine().onResizeObservable.add(() => {
-            handleResize();
-        });
-    
-        handleResize();
-        var scene_copy_pass = new PassPostProcess("Scene copy", 1, camera);
-    
-        const raymarchPass = new PostProcess("raymarching", "raymarch", {
-            size: 1,
-            samplers: ["SceneTexture"],
-            uniforms: [
-                "position",
-                "normal",
-                "uv",
-                "camPosition",
-                "eps",
-                "resolution",
-                "camTanFov",
-                "adaptiveEpsilon",
-                "lightDir",
-                "mouseUV",
-                "current_picked_shape_ro_index",
-                "program",
-                "programLength"
-            ],
-            shaderLanguage: ShaderLanguage.WGSL,
-            engine: scene.getEngine(),
-        });
-    
-        let raymarch_depth_out_buffer = new StorageBuffer(scene.getEngine(),
-            Float32Array.BYTES_PER_ELEMENT
-            * scene.getEngine().getRenderWidth()
-            * scene.getEngine().getRenderHeight()
-        )
-    
-        let picked_shape_buffer = new StorageBuffer(engine, Uint32Array.BYTES_PER_ELEMENT * 4)
-        let read_write_toggle = 0
-    
-        raymarchPass.onBeforeRenderObservable.add(effect => {
-            picked_shape_buffer.update(new Uint32Array([0]), !read_write_toggle ? 4 : 0)
-            effect.setInt("current_picked_shape_ro_index", read_write_toggle)
-            read_write_toggle = read_write_toggle ? 0 : 1
-        })
-    
-        raymarchPass.onApplyObservable.addOnce(effect => {
-            let mouseUV = new Vector2(999999., 999999.)
-            let shader_data = generateWGSL(sdSceneRepresentation)
-            effect.setFloatArray("program", new Float32Array(shader_data.program))
-            effect.setInt("programLength", shader_data.programLength)
-            // Ensure the scene has an ActionManager.
-            scene.actionManager = scene.actionManager || new ActionManager(scene);
-    
-            // Register an action for pointer movement.
-    
-            scene.onBeforeRenderObservable.add((pointerInfo) => {
-                const canvasWidth = engine.getRenderWidth();
-                const canvasHeight = engine.getRenderHeight();
-                // Normalize X from 0 to 1
-                const x = scene.pointerX / (canvasWidth * HW_SCALING);
-                // Flip the Y coordinate: pointer 0 (top) -> 1, pointer canvasHeight (bottom) -> 0
-                const y = 1.0 - (scene.pointerY / (canvasHeight * HW_SCALING));
-                const mouseUV = new Vector2(x, y);
-                effect.setVector2("mouseUV", mouseUV);
-            });
-            effect.setInt("adaptiveEpsilon", 1)
-            effect.setFloat('eps', .001)
-            effect.setFloat("camTanFov", Math.tan(camera.fov * 0.5));
-            effect.setVector2("resolution", new Vector2(engine.getRenderWidth(), engine.getRenderHeight()));
-    
-        })
-    
-        raymarchPass.onApplyObservable.add((effect) => {
-       
-            let shader_data = generateWGSL(sdSceneRepresentation)
-            effect.setFloatArray("program", new Float32Array(shader_data.program))
-                    effect.setInt("programLength", shader_data.programLength)
-            engine.setStorageBuffer("raymarch_depth_out_buffer", raymarch_depth_out_buffer);
-            engine.setStorageBuffer("picked_shape", picked_shape_buffer);
-    
-            effect._bindTexture("SceneTexture", raymarchPass.inputTexture.texture);
-    
-            effect.setIntArray("scene_shape_buffer_start_indices")
-            effect.setVector3("bound_near", rayBox.getBoundingInfo().boundingBox.minimumWorld);
-            effect.setVector3("bound_far", rayBox.getBoundingInfo().boundingBox.maximumWorld);
-            effect.setMatrix('camTransformInv', camera?.getTransformationMatrix().invert());
-            // Normalize the mouse coordinates.
-    
-    
-            effect.setVector2("iResolution", new Vector2(engine.getRenderWidth(), engine.getRenderHeight()))
-            effect.setVector3('camPosition', camera?.position)
-            effect.setVector3('camDirection', camera?.getForwardRay(1).direction)
-            effect.setVector3('lightDir', lightDir)
-            effect.setFloat('camMinZ', camera?.minZ)
-            effect.setFloat('camMaxZ', camera?.maxZ)
-            effect.setFloat('camFov', camera?.fov)
-            effect.setMatrix('camView', camera?.getViewMatrix())
-            effect.setMatrix('camProjection', camera?.getProjectionMatrix())
-            effect.setMatrix('camWorld', camera?.getWorldMatrix())
-            effect.setMatrix('camTransform', camera?.getTransformationMatrix());
-            effect.setVector3('camPosition', camera?.position)
-            effect.setInt("current_picked_shape_ro_index", read_write_toggle)
-        });
-    
-        camera.attachPostProcess(raymarchPass);
-    
-    
-        // --- Composite Pass (full-res) using object form and WGSL ---
-        // This pass blends the main scene (rendered into a render target) with the low-res raymarch result.
-        var compositePass = new PostProcess("Final compose", "composite", ["sceneIntensity", "glowIntensity", "highlightIntensity", "iResolution"], ["sceneSampler", "DepthMapTexture"], 1, camera, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ShaderLanguage.WGSL);
-    
-        compositePass.onApply = function (effect) {
-            engine.setStorageBuffer("raymarch_depth_out_buffer", raymarch_depth_out_buffer);
-            effect.setVector2("iResolution", new Vector2(engine.getRenderWidth(false), engine.getRenderHeight(false)))
-            effect._bindTexture('DepthMapTexture', depth_texture.getInternalTexture());
-            effect.setTextureFromPostProcess("sceneSampler", scene_copy_pass);
-            // effect.setTextureFromPostProcess("RaymarchTexture", raymarchPass);
-    
-        };
-    
-        return raymarchPass
+    `
+
+  const rayBox = MeshBuilder.CreateBox('rayBox', { size: 4 })
+  rayBox.position.y = 2
+  rayBox.visibility = 0
+  rayBox.isVisible = false
+
+  var depth_renderer, depth_texture
+  const handleResize = () => {
+    scene.disableDepthRenderer()
+    depth_renderer = scene.enableDepthRenderer(camera, undefined, undefined, undefined, true)
+    depth_texture = depth_renderer.getDepthMap()
+  }
+
+  scene.getEngine().onResizeObservable.add(() => {
+    handleResize()
+  })
+
+  handleResize()
+  var scene_copy_pass = new PassPostProcess('Scene copy', 1, camera)
+
+  const raymarchPass = new PostProcess('raymarching', 'raymarch', {
+    size: 1,
+    samplers: ['SceneTexture'],
+    uniforms: [
+      'position',
+      'normal',
+      'uv',
+      'camPosition',
+      'eps',
+      'resolution',
+      'camTanFov',
+      'adaptiveEpsilon',
+      'lightDir',
+      'mouseUV',
+      'current_picked_shape_ro_index',
+      'program',
+      'programLength',
+    ],
+    shaderLanguage: ShaderLanguage.WGSL,
+    engine: scene.getEngine(),
+  })
+
+  let raymarch_depth_out_buffer = new StorageBuffer(
+    scene.getEngine(),
+    Float32Array.BYTES_PER_ELEMENT *
+      scene.getEngine().getRenderWidth() *
+      scene.getEngine().getRenderHeight(),
+  )
+
+  let picked_shape_buffer = new StorageBuffer(
+    engine,
+    Uint32Array.BYTES_PER_ELEMENT * 4,
+    Constants.BUFFER_CREATIONFLAG_WRITE | Constants.BUFFER_CREATIONFLAG_READ,
+  )
+  let read_write_toggle = 0
+  scene.onBeforeRenderObservable.add((_) => {
+    picked_shape_buffer.read().then((data) => {
+      data = new Uint32Array(data.buffer)
+      let candidate = data[read_write_toggle ? 1 : 0]
+      if (candidate != state.selected_shape_id) {
+        state.selected_shape_id_buffer = candidate
+      }
+    })
+  })
+  raymarchPass.onBeforeRenderObservable.add((effect) => {
+    picked_shape_buffer.update(new Uint32Array([0]), !read_write_toggle ? 4 : 0)
+
+    effect.setInt('current_picked_shape_ro_index', read_write_toggle)
+
+    read_write_toggle = read_write_toggle ? 0 : 1
+  })
+  let last_sum = 0
+  raymarchPass.onApplyObservable.addOnce((effect) => {
+    let mouseUV = new Vector2(999999, 999999)
+    let shader_data = generateWGSL(sdSceneRepresentation)
+    let new_sum = shader_data.program.reduce((prev, curr) => prev + curr, 0)
+    if (last_sum != new_sum) {
+      effect.setFloatArray('program', new Float32Array(shader_data.program))
     }
-    
+    last_sum = new_sum
+    effect.setInt('programLength', shader_data.programLength)
+    // Ensure the scene has an ActionManager.
+    scene.actionManager = scene.actionManager || new ActionManager(scene)
+
+    // Register an action for pointer movement.
+
+    scene.onBeforeRenderObservable.add((pointerInfo) => {
+      const canvasWidth = engine.getRenderWidth()
+      const canvasHeight = engine.getRenderHeight()
+      // Normalize X from 0 to 1
+      const x = scene.pointerX / (canvasWidth * global_settings.display.resolution_multiplier)
+      // Flip the Y coordinate: pointer 0 (top) -> 1, pointer canvasHeight (bottom) -> 0
+      const y =
+        1.0 - scene.pointerY / (canvasHeight * global_settings.display.resolution_multiplier)
+      const mouseUV = new Vector2(x, y)
+      effect.setVector2('mouseUV', mouseUV)
+    })
+    watch(
+      toRef(global_settings.display.raymarch, 'adaptive_epsilon'),
+      (newValue, oldValue) => {
+        effect.setInt('adaptiveEpsilon', newValue ? 1 : 0)
+      },
+      { immediate: true },
+    )
+
+    watch(
+      toRef(global_settings.display.raymarch, 'epsilon'),
+      (newValue, oldValue) => {
+        effect.setFloat('eps', newValue)
+      },
+      { immediate: true },
+    )
+    effect.setFloat('camTanFov', Math.tan(camera.fov * 0.5))
+    effect.setVector2('resolution', new Vector2(engine.getRenderWidth(), engine.getRenderHeight()))
+  })
+
+  raymarchPass.onApplyObservable.add((effect) => {
+    let shader_data = generateWGSL(sdSceneRepresentation)
+    let new_sum = shader_data.program.reduce((prev, curr) => prev + curr, 0)
+    if (last_sum != new_sum) {
+      effect.setFloatArray('program', new Float32Array(shader_data.program))
+    }
+    last_sum = new_sum
+    effect.setInt('programLength', shader_data.programLength)
+    engine.setStorageBuffer('raymarch_depth_out_buffer', raymarch_depth_out_buffer)
+    engine.setStorageBuffer('picked_shape', picked_shape_buffer)
+
+    effect._bindTexture('SceneTexture', raymarchPass.inputTexture.texture)
+
+    effect.setIntArray('scene_shape_buffer_start_indices')
+    effect.setVector3('bound_near', rayBox.getBoundingInfo().boundingBox.minimumWorld)
+    effect.setVector3('bound_far', rayBox.getBoundingInfo().boundingBox.maximumWorld)
+    effect.setMatrix('camTransformInv', camera?.getTransformationMatrix().invert())
+    // Normalize the mouse coordinates.
+
+    effect.setVector2('iResolution', new Vector2(engine.getRenderWidth(), engine.getRenderHeight()))
+    effect.setVector3('camPosition', camera?.position)
+    effect.setVector3('camDirection', camera?.getForwardRay(1).direction)
+    effect.setVector3('lightDir', lightDir)
+    effect.setFloat('camMinZ', camera?.minZ)
+    effect.setFloat('camMaxZ', camera?.maxZ)
+    effect.setFloat('camFov', camera?.fov)
+    effect.setMatrix('camView', camera?.getViewMatrix())
+    effect.setMatrix('camProjection', camera?.getProjectionMatrix())
+    effect.setMatrix('camWorld', camera?.getWorldMatrix())
+    effect.setMatrix('camTransform', camera?.getTransformationMatrix())
+    effect.setVector3('camPosition', camera?.position)
+    effect.setInt('current_picked_shape_ro_index', read_write_toggle)
+  })
+
+  camera.attachPostProcess(raymarchPass)
+
+  // --- Composite Pass (full-res) using object form and WGSL ---
+  // This pass blends the main scene (rendered into a render target) with the low-res raymarch result.
+  var compositePass = new PostProcess(
+    'Final compose',
+    'composite',
+    ['sceneIntensity', 'glowIntensity', 'highlightIntensity', 'iResolution'],
+    ['sceneSampler', 'DepthMapTexture'],
+    1,
+    camera,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    ShaderLanguage.WGSL,
+  )
+
+  compositePass.onApply = function (effect) {
+    engine.setStorageBuffer('raymarch_depth_out_buffer', raymarch_depth_out_buffer)
+    effect.setVector2(
+      'iResolution',
+      new Vector2(engine.getRenderWidth(false), engine.getRenderHeight(false)),
+    )
+    effect._bindTexture('DepthMapTexture', depth_texture.getInternalTexture())
+    effect.setTextureFromPostProcess('sceneSampler', scene_copy_pass)
+    // effect.setTextureFromPostProcess("RaymarchTexture", raymarchPass);
+  }
+
+  return raymarchPass
+}

@@ -1,11 +1,15 @@
 <template>
-    <q-splitter v-if="sdf_scene" after-class="se_panel_root" class="fit" v-model="splitWidth">
-        <template #after>
+    <q-splitter before-class="sdfe-do-not-overflow" after-class="se_panel_root" class="absolute-full" v-model="splitWidth">
+        <template #before >
+            <GlobalSettings></GlobalSettings>
+            <slot></slot>
+        </template>
+        <template #after v-if="sdf_scene">
             <q-splitter before-class="se_panel" after-class="se_panel" id="splitter_view" v-model="splitPanelHeight"
                 horizontal :limits="[20, 80]">
                 <template #before>
                     <q-scroll-area class="scene-tree" style="height:100%">
-                        <TreeNode :node="sceneData" :selected="selected" />
+                        <TreeNode :node="sdf_scene.root" :selected="selected" />
                     </q-scroll-area>
                 </template>
 
@@ -19,33 +23,23 @@
 
                         <q-tab-panels dark vertical class="bg-transparent tab-content" v-model="activeTab">
                             <q-tab-panel name="object">
-
                                 <q-form dense dark v-if="selected">
-                                    <q-input dense dark v-model="selected.name" label="Name" />
-                                    <q-input dense dark v-model="selected.op" label="Op" />
+                                    <!-- Basic fields -->
+                                    <q-input dense dark v-model="selected.name" label="Name" class="q-mb-sm" />
+                                    <q-input dense dark v-model="selected.op" label="Op" class="q-mb-sm" />
 
-                                    <div v-for="(val, key) in selected.args" :key="key" class="q-mb-sm">
-                                        <!-- Array case: inline vector editor -->
-                                        <template v-if="Array.isArray(val)">
-                                            <div class="text-white text-caption q-mb-xs">{{ key }}</div>
-                                            <div class="row no-wrap inline-vector" style="align-items:center;">
-                                                <q-input v-for="(num, idx) in val" :key="idx" dense dark outlined
-                                                    type="number" v-model.number="selected.args[key][idx]"
-                                                    :class="{ first: idx === 0, last: idx === val.length - 1 }"
-                                                    style="width: 60px; margin-right: -1px;" />
-                                            </div>
-                                        </template>
-
-                                        <!-- Scalar case -->
-                                        <template v-else>
-                                            <q-input dense dark v-model.number="selected.args[key]" :label="key"
-                                                type="number" />
-                                        </template>
+                                    <!-- args: inline label + editor via q-field -->
+                                    <div class="row wrap">
+                                        <q-field v-for="(val, key) in selected.args" :key="key" :label="key"
+                                            label-always dense class="q-mr-md q-mb-sm"
+                                            label-class="text-caption text-white">
+                                            <vector-or-scalar-editor v-model="selected.args[key]" />
+                                        </q-field>
                                     </div>
                                 </q-form>
-
-
                             </q-tab-panel>
+
+
 
                             <q-tab-panel name="material">
 
@@ -57,17 +51,29 @@
                             </q-tab-panel>
 
                             <q-tab-panel name="modifiers">
-                                <div v-if="selected?.modifiers">
-                                    <div v-for="(m, i) in selected.modifiers" :key="i">
-                                        <q-input dense dark v-model="m.op" label="Op" />
-                                        <div v-for="(val, key) in m.args" :key="key">
-                                            <q-input dense dark v-model.number="m.args[key]" :label="key"
-                                                type="number" />
+                                <template v-if="selected?.modifiers?.length">
+                                    <div v-for="(m, i) in selected.modifiers" :key="i"
+                                        class="modifier-item q-mb-md q-pa-sm bg-grey-8 rounded">
+                                        <!-- Op field -->
+                                        <q-input dense dark filled v-model="m.op" label="Op" class="q-mb-sm" />
+
+                                        <!-- args: inline label + editor -->
+                                        <div class="row wrap">
+                                            <div v-for="(val, key) in m.args" :key="key"
+                                                class="row items-center q-mr-md q-mb-sm">
+                                                <div class="text-caption text-white q-mr-sm">
+                                                    {{ key }}
+                                                </div>
+                                                <vector-or-scalar-editor v-model="m.args[key]" />
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                                <div v-else>No modifiers</div>
+                                </template>
+                                <template v-else>
+                                    No modifiers
+                                </template>
                             </q-tab-panel>
+
                         </q-tab-panels>
                     </div>
                 </template>
@@ -77,14 +83,23 @@
 </template>
 
 <script>
+
 import SD_LIB from "src/lib/sd-lib"
 import TreeNode from "./TreeNode.vue"
+import VectorOrScalarEditor from "./VectorOrScalarEditor.vue"
+import GlobalSettings from "./GlobalSettings.vue"
 export default {
     name: "EditorOverlay",
-    components: { TreeNode },
+    components: { TreeNode, VectorOrScalarEditor, GlobalSettings },
+    watch: {
+        "state.selected_shape_id": {
+            handler(newVal, oldVal){
+                this.selected = this.sdf_scene.findNodeById(newVal)
+            }
+        }
+    },
     data() {
         return {
-
             selected: null,
             activeTab: "object",
             splitWidth: 70,
@@ -98,17 +113,12 @@ export default {
             startDrag: this.startDrag,
             validateDrop: this.validateDrop,
             doMove: this.doMove,
-            doSelect: this.doSelect,
-            addNode: (parentId, opName) => this.addNode(parentId, opName),
-            removeNode: id => this.removeNode(id)
+            doSelect: this.doSelect
         }
     },
-    inject: ['sdf_scene', 'adapter'],
-    mounted() {
-        debugger
-    },
+    inject: ['sdf_scene', 'adapter', 'state'],
+
     computed: {
-        sceneData() { return this.sdf_scene },
         colorModel: {
             get() {
                 return this.matToRbga(this.selected?.material)
@@ -138,7 +148,7 @@ export default {
                 }
                 return null
             }
-            return recurse(this.sceneData)
+            return recurse(this.sdf_scene.root)
         },
 
         // only Boolean ops are valid “groups”
@@ -178,7 +188,7 @@ export default {
                     if (res) return res
                 }
             }
-            const origin = findWithParent(this.sceneData, srcId)
+            const origin = findWithParent(this.sdf_scene.root, srcId)
             const dest = this.findById(targetId)
             if (!origin?.parent || !dest) {
                 this.draggingId = null
@@ -193,41 +203,12 @@ export default {
 
         doSelect(node) {
             this.selected = node
+            this.state.selected_shape_id = node.id
         },
 
+        
 
-        //
-        // —— NEW: Add / Remove helpers —— 
-        //
 
-        // build a blank config from SD_LIB
-        makeConfigFromLib(opName) {
-            let def = null
-            for (const cat of Object.values(SD_LIB)) {
-                if (cat[opName]) {
-                    def = cat[opName]
-                    break
-                }
-            }
-            if (!def) {
-                throw new Error(`Unknown SD_LIB op "${opName}"`)
-            }
-            const args = {}
-            for (const [k, type] of Object.entries(def.args)) {
-                if (k === "p") continue
-                if (type === "f32") {
-                    args[k] = 0
-                } else {
-                    const m = type.match(/^vec(\d+)f$/)
-                    args[k] = m ? Array(parseInt(m[1], 10)).fill(0) : 0
-                }
-            }
-            return {
-                op: opName, args, material: { r: 5.0, g: 1.0, b: 0.0, a: 1.0 }, modifiers: [
-                    { op: 'opTranslate', args: { t: [2.3, 3, -15.0] } }
-                ], children: []
-            }
-        },
 
         // add a new child under parentId
         addNode(parentId, opName) {
@@ -238,22 +219,13 @@ export default {
                 return
             }
             const cfg = this.makeConfigFromLib(opName)
-            debugger
+            // debugger
             parent.children = parent.children || []
             parent.addChild(cfg)
-            this.adapter.sync()
+            // this.adapter.sync()
         },
 
-        // remove this node (and its subtree)
-        removeNode(nodeId) {
-            const node = this.findById(nodeId)
-            if (!node || !node.parent) {
-                console.warn("Cannot remove root or missing node:", nodeId)
-                return
-            }
-            const siblings = node.parent.children
-            node.parent.children = siblings.filter(c => c !== node)
-        }
+
     }
 }
 </script>

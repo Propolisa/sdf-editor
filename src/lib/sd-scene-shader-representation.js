@@ -15,6 +15,12 @@ export function generateWGSL(scene) {
 
     scene = scene.root
     let scene_ops = new Set()
+    for (let key of Object.keys(SD_LIB.DISTANCE_FUNCTIONS)){
+        scene_ops.add(key)
+    }
+    for (let key of Object.keys(SD_LIB.BOOLEAN_OPS)){
+        scene_ops.add(key)
+    }
     function collectUsageDetails(node) {
         scene_ops.add(node.op);
         if (node.children) {

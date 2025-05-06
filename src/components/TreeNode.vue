@@ -1,33 +1,55 @@
 <template>
-    <div>
-        <div class="tree-node" :class="{ 'drag-over': dragOver }" draggable="true" @dragstart="handleDragStart"
-            @dragover="handleDragOver" @dragleave="handleDragLeave" @drop="handleDrop" @click.stop="handleSelect"
-            style="pointer-events:auto; display:flex; align-items:center;">
-            <q-chip dark class="bg-transparent" square dense
-                :icon="node.children?.length ? 'mdi-folder-outline' : 'mdi-cube-outline'"
-                :color="selected === node ? 'primary' : undefined" text-color="white">
-                <q-badge v-if="node.material" rounded
-                    :style="'background: ' + matToRbga(node.material) + '; margin-right:4px;'" />
+    <div v-if="node">
+        <div class="tree-node" :class="{ 'drag-over': dragOver, 'node-delete-dropdown': true }" draggable="true"
+            @dragstart="handleDragStart" @dragover="handleDragOver" @dragleave="handleDragLeave" @drop="handleDrop"
+            @click.stop="handleSelect" style="pointer-events:auto; display:flex; align-items:center;">
+            <q-menu touch-position context-menu>
+
+                <q-list dense style="min-width: 100px">
+                    <q-item @click="clone" clickable v-close-popup>
+                        <q-item-section>Duplicate</q-item-section>
+                    </q-item>
+                    <q-item
+                        @click="copyValueToClipboard(JSON.stringify(node.serialize(true)), 'Copied JSON literal to clipboard')"
+                        clickable v-close-popup>
+                        <q-item-section>Copy scene tree at node</q-item-section>
+                    </q-item>
+                    <q-item
+                        @click="copyValueToClipboard(node.toWGSL(), 'Copied JSON literal to clipboard')"
+                        clickable v-close-popup>
+                        <q-item-section>Copy WGSL distance-to-scene function at node</q-item-section>
+                    </q-item>
+                    <q-item
+                        @click="copyValueToClipboard(node.toGLSL(), 'Copied JSON literal to clipboard')"
+                        clickable v-close-popup>
+                        <q-item-section>Copy GLSL distance-to-scene function at node</q-item-section>
+                    </q-item>
+                </q-list>
+
+            </q-menu>
+            <q-chip dark class="tree-node-chip q-pa-none" square dense
+                :icon="node.children?.length ? 'mdi-folder-outline' : 'mdi-cube-outline'" color="transparent"
+                :text-color="isSelected ? 'yellow' : undefined">
+                <q-badge v-if="node.material" rounded :style="{
+                    background: matToRbga(node.material),
+                    marginRight: '4px'
+                }" />
+
                 {{ node.name || node.op }}
             </q-chip>
 
             <!-- Add-child dropdown, only for group nodes -->
-            <q-btn-dropdown text-color="white" v-if="validateDrop(node.id)" dense flat round dropdown-icon="mdi-plus"
-                style="pointer-events:auto;">
-                <div class="q-pa-md">
-                    <q-select dense text-color="white" hide-dropdown-icon use-input fill-input input-debounce="0"
-                        v-model="addModel" :options="options" @filter="filterFn" @update:model-value="setModel"
-                        style="min-width: 180px" placeholder="Select op…">
-                        <template v-slot:no-option>
-                            <q-item><q-item-section class="text-grey">No results</q-item-section></q-item>
-                        </template>
-                    </q-select>
-                </div>
+            <q-btn-dropdown text-color="white" v-if="validateDrop(node.id)" dense dropdown-icon="none" size="sm" flat
+                unelevated style="pointer-events:auto;">
+                <template v-slot:label>
+                    <q-icon name="mdi-plus"></q-icon>
+                </template>
+                <LibraryPicker @set-model="setModel" />
             </q-btn-dropdown>
 
             <!-- delete button on non-root nodes -->
             <q-btn text-color="white" size="sm" v-if="node.parent" dense flat round icon="mdi-delete-outline"
-                class="q-ml-sm" @click.stop="onDelete" style="pointer-events:auto;" />
+                @click.stop="onDelete" style="pointer-events:auto;" />
         </div>
 
         <div class="children">
@@ -38,10 +60,12 @@
 
 <script>
 import SD_LIB from "src/lib/sd-lib"
-
+import LibraryPicker from "./LibraryPicker.vue"
+import { copyToClipboard } from "quasar"
 
 export default {
     name: "TreeNode",
+    components: { LibraryPicker },
     props: {
         node: { type: Object, required: true },
         selected: { type: Object, default: null }
@@ -51,28 +75,37 @@ export default {
         "startDrag",
         "validateDrop",
         "doMove",
+        "sdf_scene",
+        "adapter",
         "doSelect",
-        "addNode",
-        "removeNode"
+        "state"
     ],
     data() {
         // flatten all SD_LIB ops for the select dropdown
-        const allOps = []
-        for (const [cat, group] of Object.entries(SD_LIB)) {
-            for (const [opName, def] of Object.entries(group)) {
-                allOps.push({ label: `${def.title} (${cat})`, value: opName })
-            }
-        }
+
         return {
             dragOver: false,
-            addModel: null,
-            options: allOps
+            model: null,
         }
     },
-    mounted(){
-        debugger
+    computed: {
+        isSelected() {
+            return this.selected?.id === this.node?.id || this.state.selected_shape_id === this.node?.id
+        }
+    },
+    mounted() {
+
     },
     methods: {
+        copyValueToClipboard(key, msg = "Value path copied to clipboard!") {
+            copyToClipboard(key)
+                .then(() => {
+                    this.$q.notify({
+                        message: msg
+                    })
+                })
+                .catch(() => { })
+        },
         matToRbga(m) {
             if (!m) return "rgba(0,0,0,1)"
             const [r, g, b] = [m.r, m.g, m.b].map(c => Math.round(c * 255))
@@ -101,34 +134,23 @@ export default {
             this.doSelect(this.node)
         },
 
-        // QSelect filter: lazy match on the label
-        filterFn(val, update) {
-            update(() => {
-                if (!val) {
-                    this.options = this.options // no-op: show all
-                } else {
-                    const needle = val.toLowerCase()
-                    this.options = this.options.filter(o =>
-                        o.label.toLowerCase().includes(needle)
-                    )
-                }
-            })
-        },
 
-        // called when user picks an op
         setModel(val) {
-
             if (val) {
-                this.addNode(this.node.id, val.value)
-                this.addModel = null
+                this.sdf_scene.addNode(this.node.id, val.value)
+                this.model = null
             }
         },
 
+        clone(val) {
+            this.sdf_scene.duplicateNode(this.node.id, true)
+        },
+
         onDelete() {
-            this.removeNode(this.node.id)
+            this.sdf_scene.removeNodeById(this.node.id)
         }
     },
-    
+
 }
 </script>
 

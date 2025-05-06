@@ -6,14 +6,24 @@ import {
   Color3,
   HemisphericLight,
   ArcRotateCamera,
-  Tools
+  Tools,
+  GizmoManager,
 } from '@babylonjs/core'
-import { generateSceneAndBabylonAdapter } from "src/lib/classes"
+import { generateSceneAndBabylonAdapter } from 'src/lib/classes'
 import { HW_SCALING } from 'src/lib/defaults'
-import { setupEditorView } from "src/lib/editor-controls"
-import { setupRaymarchingPp } from "src/lib/postprocess"
-const createScene = ({canvas, engine, scene}) => {
-  scene.getEngine().setHardwareScalingLevel(HW_SCALING)
+import { setupEditorView } from 'src/lib/editor-controls'
+import { setupRaymarchingPp } from 'src/lib/postprocess'
+import { watch } from 'vue'
+
+const createScene = ({ canvas, engine, scene, global_settings }) => {
+  watch(
+    global_settings.display.resolution_multiplier,
+    (newValue, oldValue) => {
+      scene.getEngine().setHardwareScalingLevel(global_settings.display.resolution_multiplier)
+    },
+    { immediate: true },
+  )
+
   scene.clearColor = new Color3(0.9, 1, 1.0)
 
   var camera = new ArcRotateCamera(
@@ -50,10 +60,9 @@ const createScene = ({canvas, engine, scene}) => {
   s2.scaling.set(0.2, 0.3, 0.23)
   let { sdf, adapter } = generateSceneAndBabylonAdapter(scene)
 
-  setupEditorView(scene, camera) 
-  let { shaderMaterial } = setupRaymarchingPp(scene, camera, light.direction, sdf)
+  let { shaderMaterial } = setupRaymarchingPp(scene, camera, light.direction, sdf, global_settings)
 
-
+  setupEditorView(scene, camera)
   camera.beta = 1.3
   camera.alpha = Tools.ToRadians(135)
   camera.radius = 11
@@ -61,7 +70,15 @@ const createScene = ({canvas, engine, scene}) => {
   engine.runRenderLoop(() => {
     scene.render()
   })
-  return {scene, adapter, sdf_scene: sdf}
+
+  watch(
+    global_settings.display.resolution_multiplier,
+    (newValue, oldValue) => {
+      scene.getEngine().setHardwareScalingLevel(global_settings.display.resolution_multiplier)
+    },
+    { immediate: true },
+  )
+  return { scene, adapter, sdf_scene: sdf }
 }
 
 export { createScene }

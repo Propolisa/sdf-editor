@@ -1,9 +1,8 @@
 <template>
   <q-layout>
-    <div class="fill">
+    
+      <canvas id="canvas" class="fill" ref="canvas" style="overflow:hidden"></canvas>
 
-      <canvas id="canvas" ref="canvas" style="width: 100%; height: 100%;"></canvas>
-    </div>
     <q-page-sticky position="top-right" :offset="[8, 8]">
       <q-select v-model="chosen_test_scene" :options="testSceneNames" style="max-width:120px" label="Scene" outlined
         dense class="sticky-select" />

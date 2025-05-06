@@ -1,16 +1,177 @@
-// app global css in SCSS form
-@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+/* atkinson-hyperlegible-next-200 - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 200;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-200.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-200italic - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: italic;
+  font-weight: 200;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-200italic.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-300 - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 300;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-300.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-300italic - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: italic;
+  font-weight: 300;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-300italic.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-regular - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 400;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-regular.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-italic - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: italic;
+  font-weight: 400;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-italic.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-500 - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 500;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-500.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-500italic - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: italic;
+  font-weight: 500;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-500italic.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-600 - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 600;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-600.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-600italic - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: italic;
+  font-weight: 600;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-600italic.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-700 - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 700;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-700.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-700italic - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: italic;
+  font-weight: 700;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-700italic.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-800 - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: normal;
+  font-weight: 800;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-800.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
+/* atkinson-hyperlegible-next-800italic - latin */
+@font-face {
+  font-display: swap; /* Check https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/font-display for other options. */
+  font-family: 'Atkinson Hyperlegible Next';
+  font-style: italic;
+  font-weight: 800;
+  src: url('../fonts/atkinson-hyperlegible-next-v4-latin-800italic.woff2') format('woff2'); /* Chrome 36+, Opera 23+, Firefox 39+, Safari 12+, iOS 10+ */
+}
 
-#vue-overlay { font-family: "Atkinson Hyperlegible", sans-serif; }
+.q-splitter__separator {
+  pointer-events: auto;
+  padding: 2px;
+  background: #18181811;
+}
+.q-splitter__separator:hover,
+.q-splitter__separator:active {
+  pointer-events: auto;
+  margin: -2px;
+  padding: 4px;
+}
+.q-splitter__separator:active {
+  background: #fffc;
+  border-radius: 4px;
+}
+.scene-tree {
+  text-shadow: 1px 1px 5px black;
+}
+.se_panel_root {
+  background: #181818;
+  padding: 8px;
+  pointer-events: auto;
+}
+.se_panel {
+  border-radius: 10px;
+  background: #303030;
+}
+.prop-container {
+  flex: 1;
+  display: flex;
+}
+.icon-tabs {
+  color: white;
+  border-right: 4px solid #99999955;
+}
+.tab-content {
+  flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+}
+.children {
+  padding-left: 16px;
+}
+.tree-node.drag-over {
+  outline: 2px dashed #1890ff;
+}
 
-.q-splitter__separator {pointer-events: auto;  padding:2px; background:#18181811 }
-.q-splitter__separator:hover,.q-splitter__separator:active {pointer-events: auto; margin:-2px; padding:4px}
-.q-splitter__separator:active {background:#fffc; border-radius:4px;}
-.scene-tree  {text-shadow: 1px 1px 5px black;}
-.se_panel_root {background:#222222aa; padding:4px; pointer-events:auto; backdrop-filter:blur(5px)}
-.se_panel {border-radius:10px; background:#ffffff22}
-.prop-container { flex: 1; display: flex; }
-.icon-tabs { color:white;  border-right: 4px solid #99999955; }
-.tab-content {flex: 1; padding: 12px; overflow-y: auto; }
-.children { padding-left: 16px; }
-.tree-node.drag-over { outline: 2px dashed #1890ff; }
+.tree-node-chip {
+  margin:2px;
+  margin-left:8px;
+  margin-top: 2px;
+}
+
+.tree-node .q-btn-dropdown__arrow-container {
+  display: none;
+}
+
+.sdfe-do-not-overflow {
+  overflow:hidden
+}
+
+.node-delete-dropdown .q-btn-dropdown__arrow-container {
+  visibility:hidden
+}

@@ -1,6 +1,6 @@
 /// BLENDER STYLE EDITING
-import "@babylonjs/core/Debug/debugLayer";
-import "@babylonjs/inspector";
+import '@babylonjs/core/Debug/debugLayer'
+import '@babylonjs/inspector'
 import {
   GizmoManager,
   Vector2,
@@ -11,10 +11,11 @@ import {
   ActionManager,
   ExecuteCodeAction,
   Axis,
+  PointerEventTypes,
 } from '@babylonjs/core'
 import { HW_SCALING } from './defaults'
 
-export function setupEditorView(scene, camera) {
+export function setupEditorView(scene, camera, global_settings, state, sdf_scene) {
   const engine = scene.getEngine()
   // Initialize GizmoManager
   var gizmoManager = new GizmoManager(scene)
@@ -217,89 +218,117 @@ export function setupEditorView(scene, camera) {
     new ExecuteCodeAction(ActionManager.OnKeyDownTrigger, function (evt) {
       var key = evt.sourceEvent.key
       var lowerKey = key.toLowerCase()
-      
 
-      if ((lowerKey === "i") && evt.sourceEvent.ctrlKey && evt.sourceEvent.altKey) {
+      if (lowerKey === 'i' && evt.sourceEvent.ctrlKey && evt.sourceEvent.altKey) {
         if (scene.debugLayer.isVisible()) {
-            scene.debugLayer.hide();
+          scene.debugLayer.hide()
         } else {
-            scene.debugLayer.show();
+          scene.debugLayer.show()
+        }
+      }
+
+      if (lowerKey === 'd' && evt.sourceEvent.shiftKey) {
+        if (state.selected_shape_id) {
+          sdf_scene.duplicateNode(state.selected_shape_id, true)
+          transformState = TransformState()
+          selectedMesh = scene.getNodeByName('node_' + state.selected_shape_id)
+          handleKey("g")
         }
       }
     }),
   )
+
+  function handleKey(lowerKey) {
+    if (['r', 's', 'g'].includes(lowerKey)) {
+      // Start a transform operation and clear any previous numeric input.
+      transformState.mode = lowerKey === 'r' ? 'rotate' : lowerKey === 's' ? 'scale' : 'translate'
+      transformState.startMatrix = selectedMesh.getWorldMatrix().clone()
+      transformState.inputStr = ''
+      transformState.amount = undefined
+      transformState.startScreenPos = null
+      transformState.baseScreenPos = null
+      transformState.initialRotationAngle = undefined
+      transformState.baseDistance = undefined
+      transformState.baseMeshScreenPos = null
+      transformState.mouseTranslation = Vector3.Zero()
+      transformState.currentScreenPos = null
+      console.log('Started:', transformState.mode)
+      updateTransform()
+    } else if (['x', 'y', 'z'].includes(lowerKey)) {
+      transformState.axis = transformState.axis === lowerKey ? null : lowerKey
+      console.log('Axis:', transformState.axis)
+      updateTransform()
+    } else if (key === 'Backspace') {
+      if (transformState.inputStr.length > 0) {
+        transformState.inputStr = transformState.inputStr.slice(0, -1)
+      }
+      transformState.amount =
+        transformState.inputStr === '' ? undefined : parseFloat(transformState.inputStr)
+      console.log('Amount:', transformState.amount)
+      updateTransform()
+    } else if (lowerKey === 'escape') {
+      if (transformState.startMatrix) {
+        var origScale = new Vector3(),
+          origRotation = new Quaternion(),
+          origTranslation = new Vector3()
+        transformState.startMatrix.decompose(origScale, origRotation, origTranslation)
+        selectedMesh.scaling.copyFrom(origScale)
+        if (!selectedMesh.rotationQuaternion) {
+          selectedMesh.rotationQuaternion = Quaternion.FromEulerVector(selectedMesh.rotation)
+        }
+        selectedMesh.rotationQuaternion.copyFrom(origRotation)
+        selectedMesh.position.copyFrom(origTranslation)
+        console.log('Transform canceled')
+      }
+      transformState = {
+        mode: null,
+        axis: null,
+        amount: undefined,
+        inputStr: '',
+        startMatrix: null,
+        startScreenPos: null,
+        baseScreenPos: null,
+        initialRotationAngle: undefined,
+        baseDistance: undefined,
+        baseMeshScreenPos: null,
+        mouseTranslation: Vector3.Zero(),
+        currentScreenPos: null,
+      }
+    } else if (!isNaN(parseInt(key)) || lowerKey === '.') {
+      transformState.inputStr += key
+      transformState.amount = parseFloat(transformState.inputStr)
+      console.log('Amount:', transformState.amount)
+      updateTransform()
+    }
+  }
+
   scene.actionManager.registerAction(
     new ExecuteCodeAction(ActionManager.OnKeyDownTrigger, function (evt) {
       var key = evt.sourceEvent.key
       var lowerKey = key.toLowerCase()
 
-      if (['r', 's', 'g'].includes(lowerKey)) {
-        // Start a transform operation and clear any previous numeric input.
-        transformState.mode = lowerKey === 'r' ? 'rotate' : lowerKey === 's' ? 'scale' : 'translate'
-        transformState.startMatrix = selectedMesh.getWorldMatrix().clone()
-        transformState.inputStr = ''
-        transformState.amount = undefined
-        transformState.startScreenPos = null
-        transformState.baseScreenPos = null
-        transformState.initialRotationAngle = undefined
-        transformState.baseDistance = undefined
-        transformState.baseMeshScreenPos = null
-        transformState.mouseTranslation = Vector3.Zero()
-        transformState.currentScreenPos = null
-        console.log('Started:', transformState.mode)
-        updateTransform()
-      } else if (['x', 'y', 'z'].includes(lowerKey)) {
-        transformState.axis = transformState.axis === lowerKey ? null : lowerKey
-        console.log('Axis:', transformState.axis)
-        updateTransform()
-      } else if (key === 'Backspace') {
-        if (transformState.inputStr.length > 0) {
-          transformState.inputStr = transformState.inputStr.slice(0, -1)
-        }
-        transformState.amount =
-          transformState.inputStr === '' ? undefined : parseFloat(transformState.inputStr)
-        console.log('Amount:', transformState.amount)
-        updateTransform()
-      } else if (lowerKey === 'escape') {
-        if (transformState.startMatrix) {
-          var origScale = new Vector3(),
-            origRotation = new Quaternion(),
-            origTranslation = new Vector3()
-          transformState.startMatrix.decompose(origScale, origRotation, origTranslation)
-          selectedMesh.scaling.copyFrom(origScale)
-          if (!selectedMesh.rotationQuaternion) {
-            selectedMesh.rotationQuaternion = Quaternion.FromEulerVector(selectedMesh.rotation)
-          }
-          selectedMesh.rotationQuaternion.copyFrom(origRotation)
-          selectedMesh.position.copyFrom(origTranslation)
-          console.log('Transform canceled')
-        }
-        transformState = {
-          mode: null,
-          axis: null,
-          amount: undefined,
-          inputStr: '',
-          startMatrix: null,
-          startScreenPos: null,
-          baseScreenPos: null,
-          initialRotationAngle: undefined,
-          baseDistance: undefined,
-          baseMeshScreenPos: null,
-          mouseTranslation: Vector3.Zero(),
-          currentScreenPos: null,
-        }
-      } else if (!isNaN(parseInt(key)) || lowerKey === '.') {
-        transformState.inputStr += key
-        transformState.amount = parseFloat(transformState.inputStr)
-        console.log('Amount:', transformState.amount)
-        updateTransform()
-      }
+      handleKey(lowerKey)
     }),
   )
 
+  scene.onPointerObservable.add((pointerInfo) => {
+    switch (pointerInfo.type) {
+      case PointerEventTypes.POINTERDOWN:
+        if (state.selected_shape_id_buffer) {
+          state.selected_shape_id = state.selected_shape_id_buffer
+          gizmoManager.attachToMesh(scene.getMeshByName('node_' + state.selected_shape_id))
+        }
+
+        break
+    }
+  })
+
   // Handle pointer movement in screen space.
   scene.onPointerMove = function (evt) {
-    var currentScreenPos = new Vector2(evt.clientX / HW_SCALING, evt.clientY / HW_SCALING)
+    var currentScreenPos = new Vector2(
+      evt.clientX / global_settings.display.resolution_multiplier,
+      evt.clientY / global_settings.display.resolution_multiplier,
+    )
     transformState.currentScreenPos = currentScreenPos
     if (transformState.mode) {
       // Capture the initial pointer position if not already done.
