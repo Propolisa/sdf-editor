@@ -130,8 +130,9 @@
 //     }
 // }
 
-import { StandardMaterial, MeshBuilder } from '@babylonjs/core'
+import { StandardMaterial, MeshBuilder, Matrix, Quaternion, Vector3 } from '@babylonjs/core'
 import SD_LIB from './sd-lib'
+import { FISH } from "./scenes"
 
 // 1) Flatten SD_LIB into a quick lookup: opName → { category, def }
 const OP_DEFS = {}
@@ -178,12 +179,20 @@ const SCENE_DEF_JSON = {
               material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
 
               modifiers: [
-                { op: 'opTranslate', args: { t: [0.0, -0.5, 0.0] } },
-                { op: 'opRotateY', args: { a: 0 } },
-                { op: 'opRotateX', args: { a: 0 } },
-                { op: 'opRotateZ', args: { a: 0 } },
+                // no artifact when scaled down
+                // { op: 'opTranslate', args: { t: [0.0, -0.5, 0.0] } },
+                // { op: 'opRotateY', args: { a: 0 } },
+                // { op: 'opRotateX', args: { a: 0 } },
+                // { op: 'opRotateZ', args: { a: 0 } },
 
-                { op: 'opScale', args: { s: 1 } },
+                // { op: 'opScale', args: { s: 0.3 } },
+                {
+                  // this has artifact when scaled down
+                  op: 'opTransform',
+                  args: {
+                    transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0.5, 0, 1],
+                  },
+                },
               ],
             },
             {
@@ -253,6 +262,7 @@ const SCENE_DEF_JSON = {
   ],
 }
 
+
 /*
  * Defines classes for procedural SDF scene construction:
  *  - SDFModifier: wraps a modifier operation
@@ -269,7 +279,7 @@ export class SDFModifier {
   constructor({ op, args = {} }) {
     this.op = op
     this.onChange = null
-
+    this.def = SD_LIB?.[op]
     const isEqual = (a, b) => {
       if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
         return a.every((v, i) => v === b[i])
@@ -298,12 +308,14 @@ export class SDFModifier {
 // 3) small map for WGSL vs GLSL
 const SHADERS = {
   wgsl: {
-    header: body => `fn sdScene(p: vec3f) -> f32 {\n  return ${body};\n}`,
-    vec:   n    => `vec${n}f`,
+    header: (body) => `fn sdScene(p: vec3<f32>) -> f32 {\n  return ${body};\n}`,
+    vec: (n) => `vec${n}f`,
+    mat4: `mat4x4<f32>`,
   },
   glsl: {
-    header: body => `float sdScene(vec3 p) {\n  return ${body};\n}`,
-    vec:   n    => `vec${n}`,
+    header: (body) => `float sdScene(vec3 p) {\n  return ${body};\n}`,
+    vec: (n) => `vec${n}`,
+    mat4: `mat4`,
   },
 }
 
@@ -343,6 +355,25 @@ export class SDFNode {
     for (const childConfig of children) {
       this.children.push(new SDFNode(childConfig, scene, this))
     }
+  }
+
+  /**
+   * Add a new modifier op (from SD_LIB) to this node.
+   * @param opName   One of the keys in SD_LIB (e.g. "opTranslate", "opScale", etc.)
+   * @param args     Optional overrides for that modifier’s arguments
+   * @returns        The newly created SDFModifier
+   */
+  addModifier(opName, args = {}) {
+    // 1) Build a minimal config for that op (same as addNode does under the hood)
+    const cfg = this.scene._makeConfigFromLib(opName)
+    // 2) Override any default args with what the caller passed
+    cfg.args = { ...cfg.args, ...args }
+    // 3) Wrap it in an SDFModifier
+    const mod = new SDFModifier(cfg)
+    // 4) Attach to this node and re-sync any adapters
+    this.modifiers.push(mod)
+    this.scene.updateAdapters()
+    return mod
   }
 
   /**
@@ -426,39 +457,63 @@ export class SDFNode {
     return s.header(body)
   }
 
-  _emit(varName, { vec }) {
+  // inside class SDFNode { …
+
+  _emit(varName, { vec, mat4 }) {
     const { category, def } = OP_DEFS[this.op]
     let expr = varName
 
-    // 1) apply any positioning modifiers
+    // 1) apply positioning modifiers (translate, rotate, scale, transform)
     for (const mod of this.modifiers) {
       const meta = OP_DEFS[mod.op]
-      const args = Object.keys(meta.def.args)
-                        .filter(a => !CONTEXTUAL[meta.category].has(a))
-      const lits = args.map(a => this._lit(mod.args[a], meta.def.args[a], vec))
-      expr = `${mod.op}(${expr}${lits.length ? ', '+lits.join(', ') : ''})`
+      const args = Object.keys(meta.def.args).filter((a) => !CONTEXTUAL[meta.category].has(a))
+      const lits = args.map((a) => {
+        if (mod.op === 'opTransform' && a === 'transform') {
+          // emit a mat4x4<f32>(…) or mat4(…) literal
+          const elems = mod.args[a].map((el) => this._fmtNum(el)).join(', ')
+          return `${mat4}(${elems})`
+        }
+        // fallback for vecN or scalar
+        return this._lit(mod.args[a], meta.def.args[a], { vec, mat4 })
+      })
+      expr = `${mod.op}(${expr}${lits.length ? ', ' + lits.join(', ') : ''})`
     }
 
     // 2) prepare children & extra args
-    const kids = (this.children||[]).map(c => c._emit('p', {vec}))
+    const kids = (this.children || []).map((c) => c._emit('p', { vec, mat4 }))
     const extra = Object.keys(def.args)
-                        .filter(a => !CONTEXTUAL[category].has(a))
-                        .map(a => this._lit(this.args[a], def.args[a], vec))
+      .filter((a) => !CONTEXTUAL[category].has(a))
+      .map((a) => this._lit(this.args[a], def.args[a], { vec, mat4 }))
 
-    // 3a) distance & primitive:  op(expr, …extra)
+    // 3a) leaf‐SDF or primitive: apply local → world scaling
     if (category === 'DISTANCE_FUNCTIONS' || category === 'PRIMITIVE_OPS') {
-      return `${this.op}(${[expr, ...extra].join(', ')})`
+      // raw local‐space call
+      const call = `${this.op}(${[expr, ...extra].join(', ')})`
+
+      // extract uniform scale:
+      let sNum = 1.0
+      const scaleMod = this.modifiers.find((m) => m.op === 'opScale')
+      const xfMod = this.modifiers.find((m) => m.op === 'opTransform')
+      if (scaleMod) {
+        sNum = scaleMod.args.s
+      } else if (xfMod) {
+        const M = xfMod.args.transform
+        // scale = length of first column (M00,M10,M20)
+        sNum = Math.hypot(M[0], M[1], M[2])
+      }
+      const sLit = this._fmtNum(sNum)
+
+      // world‐space distance
+      return `(${call}) * ${sLit}`
     }
 
-    // 3b) binary fold for boolean/displacement
+    // 3b) boolean/displacement chaining (unchanged)
     if (category === 'BOOLEAN_OPS' || category === 'DISPLACEMENT_OPS') {
       let acc = kids[0]
-      const tail = kids.slice(1)
-      const e    = extra.join(', ')
+      const tail = kids.slice(1),
+        e = extra.join(', ')
       for (const k of tail) {
-        acc = e
-          ? `${this.op}(${acc}, ${k}, ${e})`
-          : `${this.op}(${acc}, ${k})`
+        acc = e ? `${this.op}(${acc}, ${k}, ${e})` : `${this.op}(${acc}, ${k})`
       }
       return acc
     }
@@ -466,23 +521,29 @@ export class SDFNode {
     throw new Error(`Unsupported category "${category}" for "${this.op}"`)
   }
 
-  _lit(v, wgslType, vec) {
-    if (Array.isArray(v)) {
-      const n = (wgslType.match(/^vec(\d+)f/) || [])[1] || v.length;
-      const elems = v.map(el => this._fmtNum(el));
-      return `${vec(n)}(${elems.join(', ')})`;
+  _lit(v, type, { vec, mat4 }) {
+    // mat4x4 or mat4 literal
+    if (Array.isArray(v) && type.startsWith('mat4')) {
+      const elems = v.map((el) => this._fmtNum(el)).join(', ')
+      return `${mat4}(${elems})`
     }
-    return this._fmtNum(v);
+    // vector literal
+    if (Array.isArray(v)) {
+      const n = (type.match(/^vec(\d+)/) || [])[1] || v.length
+      const elems = v.map((el) => this._fmtNum(el)).join(', ')
+      return `${vec(n)}(${elems})`
+    }
+    // scalar literal
+    return this._fmtNum(v)
   }
 
   /** Always render a number with a decimal point if it doesn’t have one */
   _fmtNum(n) {
-    let s = n.toString();
+    let s = n.toString()
     // if no "." and not scientific (e.g. "1e-3"), append ".0"
-    if (!s.includes('.') && !s.toLowerCase().includes('e')) s += '.0';
-    return s;
+    if (!s.includes('.') && !s.toLowerCase().includes('e')) s += '.0'
+    return s
   }
-
 }
 
 // --- SDFScene: owns ID pool & builds the whole tree ---
@@ -692,7 +753,6 @@ export class SDFBabylonAdapter {
     return found
   }
 
-  // Always create a centered unit-box, then apply transforms
   _createMeshFromNode(node) {
     // 1) Create a unit cube centered at (0,0,0)
     const mesh = MeshBuilder.CreateBox(
@@ -712,37 +772,117 @@ export class SDFBabylonAdapter {
       mod.onChange = () => this._applyModifiersToMesh(node, mesh)
     }
 
-    // 4) Babylon→SDF: write back mesh transforms into modifiers
+    // 4) Babylon→SDF: update node modifiers after the world matrix changes
     mesh.registerAfterWorldMatrixUpdate(() => {
+      // 4.1) Extract current TRS from the mesh
       const { x: px, y: py, z: pz } = mesh.position
-
       const {
         x: rx,
         y: ry,
         z: rz,
       } = mesh.rotationQuaternion ? mesh.rotationQuaternion.toEulerAngles() : mesh.rotation
-      const { x: sx, y: sy, z: sz } = mesh.scaling
-      this._writeBackModifier(node, 'opTranslate', [px, py, pz])
-      this._writeBackModifier(node, 'opRotateX', rx)
-      this._writeBackModifier(node, 'opRotateY', ry)
-      this._writeBackModifier(node, 'opRotateZ', rz)
-      this._writeBackModifier(node, 'opScale', sx)
+      const { x: sx } = mesh.scaling // assume uniform scale
+
+      // 4.2) Determine which primitive ops are actually needed
+      const need = {
+        opTranslate: px !== 0 || py !== 0 || pz !== 0,
+        opRotateX: rx !== 0,
+        opRotateY: ry !== 0,
+        opRotateZ: rz !== 0,
+        opScale: sx !== 1,
+      }
+
+      // helper to check for existing modifier
+      const hasMod = (op) => node.modifiers.some((m) => m.op === op)
+
+      // 4.3) If *any* needed primitive is missing, fall back to opTransform
+      const missingAny = Object.entries(need).some(([op, needed]) => needed && !hasMod(op))
+
+      if (missingAny || hasMod('opTransform')) {
+        // strip out all primitive modifiers
+        node.modifiers = node.modifiers.filter(
+          (m) => !['opTranslate', 'opRotateX', 'opRotateY', 'opRotateZ', 'opScale'].includes(m.op),
+        )
+
+        // compute inverse world matrix and flatten into a 16-array
+        const inv = mesh.getWorldMatrix().clone().invert()
+        const M = inv.m // row-major 16-element array
+        const transform = [
+          M[0],
+          M[1],
+          M[2],
+          M[3],
+          M[4],
+          M[5],
+          M[6],
+          M[7],
+          M[8],
+          M[9],
+          M[10],
+          M[11],
+          M[12],
+          M[13],
+          M[14],
+          M[15],
+        ]
+
+        // upsert opTransform
+        let tf = node.modifiers.find((m) => m.op === 'opTransform')
+        if (tf) {
+          tf.args.transform = transform
+        } else {
+          node.modifiers.push({ op: 'opTransform', args: { transform } })
+        }
+      } else {
+        // all needed primitives exist → update them
+        this._writeBackModifier(node, 'opTranslate', [px, py, pz])
+        this._writeBackModifier(node, 'opRotateX', rx)
+        this._writeBackModifier(node, 'opRotateY', ry)
+        this._writeBackModifier(node, 'opRotateZ', rz)
+        this._writeBackModifier(node, 'opScale', sx)
+
+        // remove any stale opTransform so it doesn’t override
+        node.modifiers = node.modifiers.filter((m) => m.op !== 'opTransform')
+      }
     })
 
     return mesh
   }
 
-  // Reads all four built-in modifiers and applies them to the mesh
+  // Reads all modifiers and applies them to the mesh
   _applyModifiersToMesh(node, mesh) {
+    const tfMod = node.modifiers.find((m) => m.op === 'opTransform')
+    if (tfMod) {
+      // tfMod.args.transform is a 16-element row-major *inverse* world-matrix
+      const invMat = Matrix.FromArray(tfMod.args.transform)
+      const worldMat = invMat.clone().invert()
+
+      // prepare mutable holders for decompose
+      const scaling = new Vector3()
+      const rotationQuaternion = new Quaternion()
+      const translation = new Vector3()
+
+      // decompose into S, R, T
+      worldMat.decompose(scaling, rotationQuaternion, translation)
+
+      // apply to mesh
+      mesh.position.copyFrom(translation)
+      mesh.scaling.copyFrom(scaling)
+      mesh.rotationQuaternion = rotationQuaternion
+
+      return
+    }
+
+    // fallback to primitive modifiers
     const get = (op) => node.modifiers.find((m) => m.op === op)?.args
     const t = get('opTranslate')?.t ?? [0, 0, 0]
     const rx = get('opRotateX')?.a ?? 0
     const ry = get('opRotateY')?.a ?? 0
     const rz = get('opRotateZ')?.a ?? 0
-    let opScale = get('opScale')
-    let s = opScale ? [opScale.s, opScale.s, opScale.s] : [1, 1, 1]
+    const sArg = get('opScale')?.s
+    const s = sArg != null ? [sArg, sArg, sArg] : [1, 1, 1]
 
-    if (t) mesh.position.set(...t)
+    mesh.position.set(...t)
     mesh.rotation.set(rx, ry, rz)
     mesh.scaling.set(...s)
   }
@@ -791,7 +931,7 @@ export class SDFBabylonAdapter {
 
 // --- Helper to generate both scenes together ---
 export function generateSceneAndBabylonAdapter(babylonScene) {
-  const sdf = new SDFScene(SCENE_DEF_JSON) // your SDFScene
+  const sdf = new SDFScene(FISH) // your SDFScene
   const adapter = new SDFBabylonAdapter(sdf, babylonScene)
   // whenever you add/remove nodes: call adapter.sync()
   return { sdf, adapter }

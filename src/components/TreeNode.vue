@@ -10,18 +10,20 @@
                         <q-item-section>Duplicate</q-item-section>
                     </q-item>
                     <q-item
-                        @click="copyValueToClipboard(JSON.stringify(node.serialize(true)), 'Copied JSON literal to clipboard')"
+                        @click="copyValueToClipboard(JSON.stringify(node.serialize(true), null, '  '), 'Copied JSON literal to clipboard')"
                         clickable v-close-popup>
                         <q-item-section>Copy scene tree at node</q-item-section>
                     </q-item>
-                    <q-item
-                        @click="copyValueToClipboard(node.toWGSL(), 'Copied JSON literal to clipboard')"
+                    <q-item @click="copyValueToClipboard(getCompiledWgsl(), 'Copied JSON literal to clipboard')"
                         clickable v-close-popup>
+                        <q-item-section>[STACK] copy WGSL distance-to-scene function at node</q-item-section>
+                    </q-item>
+                    <q-item @click="copyValueToClipboard(node.toWGSL(), 'Copied JSON literal to clipboard')" clickable
+                        v-close-popup>
                         <q-item-section>Copy WGSL distance-to-scene function at node</q-item-section>
                     </q-item>
-                    <q-item
-                        @click="copyValueToClipboard(node.toGLSL(), 'Copied JSON literal to clipboard')"
-                        clickable v-close-popup>
+                    <q-item @click="copyValueToClipboard(node.toGLSL(), 'Copied JSON literal to clipboard')" clickable
+                        v-close-popup>
                         <q-item-section>Copy GLSL distance-to-scene function at node</q-item-section>
                     </q-item>
                 </q-list>
@@ -46,9 +48,11 @@
                 </template>
                 <LibraryPicker @set-model="setModel" />
             </q-btn-dropdown>
-
             <!-- delete button on non-root nodes -->
-            <q-btn text-color="white" size="sm" v-if="node.parent" dense flat round icon="mdi-delete-outline"
+            <q-btn text-color="white" size="xs" v-if="node.parent" dense flat round icon="mdi-content-duplicate"
+                @click.stop="clone" style="pointer-events:auto;" />
+            <!-- delete button on non-root nodes -->
+            <q-btn text-color="white" size="xs" v-if="node.parent" dense flat round icon="mdi-delete-outline"
                 @click.stop="onDelete" style="pointer-events:auto;" />
         </div>
 
@@ -62,6 +66,7 @@
 import SD_LIB from "src/lib/sd-lib"
 import LibraryPicker from "./LibraryPicker.vue"
 import { copyToClipboard } from "quasar"
+import { generateWGSL } from "src/lib/sd-scene-shader-representation"
 
 export default {
     name: "TreeNode",
@@ -97,6 +102,9 @@ export default {
 
     },
     methods: {
+        getCompiledWgsl() {
+            return generateWGSL(this.node.scene, { compile_static: true })?.code
+        },
         copyValueToClipboard(key, msg = "Value path copied to clipboard!") {
             copyToClipboard(key)
                 .then(() => {
@@ -148,7 +156,8 @@ export default {
 
         onDelete() {
             this.sdf_scene.removeNodeById(this.node.id)
-        }
+        },
+
     },
 
 }

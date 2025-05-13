@@ -28,6 +28,7 @@ export function setupRaymarchingPp(
 ) {
   const engine = scene.getEngine()
   const shader_output = generateWGSL(sdSceneRepresentation)
+  window.CODE = shader_output
   ShaderStore.ShadersStoreWGSL['raymarchFragmentShader'] = `
         uniform iResolution : vec2<f32>;
         var SceneTexture: texture_2d<f32>;
@@ -78,24 +79,35 @@ export function setupRaymarchingPp(
             
     
        ${shader_output.code}
-    
-    // Computes ambient occlusion at point p given its normal n.
-    // It samples a few points along the normal and compares the SDF value
-    // to the expected offset distance. More occlusion (lower returned AO) is added
-    // if the actual distance is smaller than the offset.
-    fn ambientOcclusion(p: vec3<f32>, n: vec3<f32>) -> f32 {
-        var occ: f32 = 0.0;
-        let numSamples: i32 = 5;
-        for (var i: i32 = 1; i <= numSamples; i = i + 1) {
-            let sampleDist: f32 = 0.02 * f32(i);
-            let sampleP: vec3<f32> = p + n * sampleDist;
-            let d: f32 = sdf(sampleP);
-            occ = occ + (sampleDist - d) / sampleDist;
-        }
-        occ = occ / f32(numSamples);
-        return clamp(1.0 - occ, 0.0, 1.0);
-    }
-    
+   
+
+// fn ambientOcclusion(p: vec3<f32>, n: vec3<f32>) -> f32 {
+//     // you can pull these from uniforms if you like
+//     let NUM_SAMPLES:      i32   = 16;
+//     let MAX_DIST:         f32   = 0.1;
+//     let FALLOFF:          f32   = 1.0;
+//     let invNum:           f32   = 1.0 / f32(NUM_SAMPLES);
+//     // hemisphere‐mix factor to reduce self‐occlusion with few samples
+//     let rad:              f32   = 1.0 - invNum;
+
+//     var aoAcc:            f32   = 0.0;
+
+//     for (var i: i32 = 0; i < NUM_SAMPLES; i = i + 1) {
+//         let fi:            f32   = f32(i);
+//         // pick a random length in [0, MAX_DIST]
+//         let l:             f32   = hash(fi) * MAX_DIST;
+//         // pick a direction skewed towards the normal
+//         let hemi:          vec3<f32> = randomHemisphereDir(n, fi);
+//         let dir:           vec3<f32> = normalize(n + hemi * rad);
+//         // evaluate the SDF
+//         let d:             f32   = max(sdf(p + dir * l), 0.0);
+//         // accumulate occlusion
+//         aoAcc = aoAcc + (l - d) / MAX_DIST * FALLOFF;
+//     }
+
+//     let ao:              f32   = 1.0 - aoAcc * invNum;
+//     return clamp(ao, 0.0, 1.0);
+// }
     // Computes a simple environment light based on the ray direction.
     // This returns a color that blends between a darker and a lighter sky color.
     fn environmentLight(rayDir: vec3<f32>) -> vec3<f32> {
@@ -111,105 +123,24 @@ export function setupRaymarchingPp(
         return max(uniforms.eps, pixelSize);
     }
     
-    //////////////////////////////////////////////
-    // Scene Functions and Raymarching with Material Lookup
-    //////////////////////////////////////////////
-    // Translate - exact
-    
-    // fn test(p: vec3<f32>) -> f32 {
-    //     return opSmoothSubtract(
-    //         /* subtract “notch” */
-    //         opSmoothUnion(
-    //             /* chamfer‑union of trunk and canopy */
-    
-    //             /* — trunk (smooth blend of three parts) — */
-    //             opSmoothUnion(
-    //                 opSmoothUnion(
-    //                     /* part 1: rounded box */
-    //                     sdRoundBox(
-    //                         opTranslate(p, vec3<f32>(0.0, -0.5, 0.0)),
-    //                         vec3<f32>(3.0, 0.2, 3.0),
-    //                         0.5
-    //                     ),
-    //                     /* part 2: small sphere */
-    //                     sdSphere(
-    //                         opTranslate(p, vec3<f32>(0.0, 0.3, 0.0)),
-    //                         0.3
-    //                     ),
-    //                     0.3
-    //                 ),
-    //                 /* part 3: small sphere higher up */
-    //                 sdSphere(
-    //                     opTranslate(p, vec3<f32>(0.0, 0.7, 0.0)),
-    //                     0.25
-    //                 ),
-    //                 0.3
-    //             ),
-    
-    //             /* — canopy (smooth blend of four spheres) — */
-    //             opSmoothUnion(
-    //                 opSmoothUnion(
-    //                     opSmoothUnion(
-    //                         /* canopy sphere 1 */
-    //                         sdSphere(
-    //                             opTranslate(p, vec3<f32>(0.0, 1.2, 0.0)),
-    //                             0.4
-    //                         ),
-    //                         /* canopy sphere 2 */
-    //                         sdSphere(
-    //                             opTranslate(p, vec3<f32>(0.4, 1.3, 0.0)),
-    //                             0.35
-    //                         ),
-    //                         0.4
-    //                     ),
-    //                     /* canopy sphere 3 */
-    //                     sdSphere(
-    //                         opTranslate(p, vec3<f32>(-0.4, 1.3, 0.0)),
-    //                         0.25
-    //                     ),
-    //                     0.4
-    //                 ),
-    //                 /* canopy sphere 4 */
-    //                 sdSphere(
-    //                     opTranslate(p, vec3<f32>(0.0, 1.5, 0.4)),
-    //                     0.3
-    //                 ),
-    //                 0.4
-    //             ),
-    
-    //             /* chamfer radius = 0 */
-    //             0.0
-    //         ),
-    
-    //         /* notch sphere to subtract */
-    //         sdSphere(
-    //             opTranslate(p, vec3<f32>(0.0, 1.2, 0.3)),
-    //             0.1
-    //         ),
-    
-    //         /* smooth‑subtract blend factor k */
-    //         0.15
-    //     );
-    // }
-    
-    
     // Use the distance-only evaluation for marching.
     fn sdf(p: vec3<f32>) -> f32 {
         return sdRpn(p);
     }
     
-    
-    // Updated RayHit structure now includes the material (a vec4).
+    // Updated RayHit now includes the surface normal and AO.
     struct RayHit {
-        hit: bool,
+        hit:      bool,
         distance: f32,
         position: vec3<f32>,
+        normal:   vec3<f32>,
+        ao:       f32,
         material: vec4<f32>,
-        shapeID: u32
+        shapeID:  u32
     };
     
     // Basic raymarching function that uses distance-only sdf. Only if a hit is detected
-    // do we compute the material via sdRpnMaterial.
+    // do we compute the full material+normal+AO via sdRpnMaterial.
     fn raymarch(origin: vec3<f32>, dir: vec3<f32>) -> RayHit {
         var totalDistance = 0.0;
         let MAX_DISTANCE = 30.0;
@@ -231,34 +162,23 @@ export function setupRaymarchingPp(
             }
         }
         
-        // Default material if nothing is hit.
-        var mat: vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 1.0);
-        var shapeID = 0u;
-        // Only compute material once we have reached the isosurface.
+        // Defaults
+        var mat:     vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 1.0);
+        var N:       vec3<f32> = vec3<f32>(0.0, 1.0, 0.0);
+        var occ:     f32       = 1.0;
+        var shapeID: u32       = 0u;
+        
         if (hit) {
-            // Final lookup of the material using the full evaluator.
+            // Final full evaluation: gives us color, shapeID, normal, ao
             let res = sdRpnMaterial(pos);
-            mat = res.color;
+            mat     = res.color;
             shapeID = res.shapeID;
+            N       = res.normal;
+            occ     = res.ao;
         }
         
-        // add shape id to output, make that shape red based on it being same as current
-        return RayHit(hit, totalDistance, pos, mat, shapeID);
+        return RayHit(hit, totalDistance, pos, N, occ, mat, shapeID);
     }
-    
-    // Compute a simple normal via central differences based on the distance-only sdf.
-    fn normal(p: vec3<f32>) -> vec3<f32> {
-        let eps = 0.001;
-        return normalize(vec3<f32>(
-            sdf(p + vec3<f32>(eps, 0.0, 0.0)) - sdf(p - vec3<f32>(eps, 0.0, 0.0)),
-            sdf(p + vec3<f32>(0.0, eps, 0.0)) - sdf(p - vec3<f32>(0.0, eps, 0.0)),
-            sdf(p + vec3<f32>(0.0, 0.0, eps)) - sdf(p - vec3<f32>(0.0, 0.0, eps))
-        ));
-    }
-    
-    //////////////////////////////////////////////
-    // Fragment Shader Main Function
-    //////////////////////////////////////////////
     
     //-- Helper: boost saturation & brightness --
     fn bumpColor(color: vec3<f32>, satFactor: f32, brightFactor: f32) -> vec3<f32> {
@@ -269,36 +189,42 @@ export function setupRaymarchingPp(
     
     @fragment
     fn main(input : FragmentInputs) -> FragmentOutputs {
+        // background
         var sceneColor: vec4<f32> = textureSample(SceneTexture, SceneTextureSampler, input.vUV);
     
-        let rayOrigin = uniforms.camPosition;
-        let rayDirection = getRayFromScreenSpaceNonNorm(input.vUV);
+        let rayOrigin    = uniforms.camPosition;
+        let rayDirection = normalize(getRayFromScreenSpaceNonNorm(input.vUV));
     
-        let hitResult = raymarch(rayOrigin, normalize(rayDirection));
-    
+        // raymarch
+        let hitResult = raymarch(rayOrigin, rayDirection);
+        let fragPx  = vec2<i32>(
+            i32(input.vUV.x * uniforms.iResolution.x),
+            i32(input.vUV.y * uniforms.iResolution.y)
+        );
+        let mousePx = vec2<i32>(
+            i32(uniforms.mouseUV.x * uniforms.iResolution.x),
+            i32(uniforms.mouseUV.y * uniforms.iResolution.y)
+        );
         var col: vec4<f32>;
         if (hitResult.hit) {
-            let distanceToMouse: f32 = distance(input.vUV, uniforms.mouseUV);
-            let threshold: f32 = 0.01;
-            if (distanceToMouse < threshold) {
-                picked_shape[select(0u, 1u, uniforms.current_picked_shape_ro_index == 0u)] =
-                    i32(hitResult.shapeID);
+            // pick highlighting
+            if (fragPx.x == mousePx.x && fragPx.y == mousePx.y) {
+                picked_shape[
+                    select(0u, 1u, uniforms.current_picked_shape_ro_index == 0u)
+                ] = i32(hitResult.shapeID);
             }
+            // lighting
+            let diffuse: f32 = clamp(dot(hitResult.normal, uniforms.lightDir), 0.3, 1.0);
+            let env:     vec3<f32> = environmentLight(rayDirection);
+            let lighting: vec3<f32> = hitResult.material.rgb * diffuse + 0.2 * env;
     
-            let N = normal(hitResult.position);
-            let lightDir = uniforms.lightDir;
-            let diffuse: f32 = clamp(dot(N, lightDir), 0.3, 1.0);
-            let ao: f32 = ambientOcclusion(hitResult.position, N);
-            let env: vec3<f32> = environmentLight(normalize(rayDirection));
-            let lighting: vec3<f32> = hitResult.material.rgb * diffuse + 0.4 * env;
-            col = vec4(lighting * ao, 1.0);
+            // apply precomputed AO
+            col = vec4<f32>(lighting * hitResult.ao, hitResult.material.a);
     
-            // instead of mixing with red, boost brightness & saturation
+            // picked-shape tint
             if (u32(picked_shape[uniforms.current_picked_shape_ro_index]) == hitResult.shapeID) {
-                let SAT_BOOST: f32 = 1.8;
-                let BRIGHT_BOOST: f32 = 1.5;
-                let boosted = bumpColor(col.rgb, SAT_BOOST, BRIGHT_BOOST);
-                col = vec4(boosted, col.a);
+                let boosted = bumpColor(col.rgb, 1.8, 1.5);
+                col = vec4<f32>(boosted, col.a);
             }
         } else {
             col = sceneColor;
@@ -312,10 +238,11 @@ export function setupRaymarchingPp(
         let index: i32 = pixelCoords.y * i32(uniforms.iResolution.x) + pixelCoords.x;
         raymarch_depth_out_buffer[index] = hitResult.distance;
     
-        var fragmentOutputs: FragmentOutputs;
-        fragmentOutputs.color = col;
-        return fragmentOutputs;
+        var o: FragmentOutputs;
+        o.color = col;
+        return o;
     }
+
     
     `
 

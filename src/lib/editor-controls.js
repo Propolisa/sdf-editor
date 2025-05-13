@@ -21,7 +21,7 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
   var gizmoManager = new GizmoManager(scene)
 
   // Initialize all gizmos
-  gizmoManager.boundingBoxGizmoEnabled = true
+  // gizmoManager.boundingBoxGizmoEnabled = true
 
   // --- Transform State Machine Integration with Realtime Preview ---
   // We'll work with sphereGlass as the selected mesh.
@@ -59,7 +59,19 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
   }
 
   function updateTransform() {
-    if (!transformState.mode || !transformState.startMatrix) return
+    // nothing to do until a mode & matrix are set
+    if (!transformState.mode || !transformState.startMatrix) {
+      return
+    }
+
+    // for translate, we need both baseScreenPos and currentScreenPos
+    if (
+      transformState.mode === 'translate' &&
+      (!transformState.baseScreenPos || !transformState.currentScreenPos)
+    ) {
+      return
+    }
+
     var origScale = new Vector3(),
       origRotation = new Quaternion(),
       origTranslation = new Vector3()
@@ -219,6 +231,11 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
       var key = evt.sourceEvent.key
       var lowerKey = key.toLowerCase()
 
+      if (lowerKey === 'escape') {
+        transformState = TransformState()
+        return
+      }
+
       if (lowerKey === 'i' && evt.sourceEvent.ctrlKey && evt.sourceEvent.altKey) {
         if (scene.debugLayer.isVisible()) {
           scene.debugLayer.hide()
@@ -232,13 +249,14 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
           sdf_scene.duplicateNode(state.selected_shape_id, true)
           transformState = TransformState()
           selectedMesh = scene.getNodeByName('node_' + state.selected_shape_id)
-          handleKey("g")
+          handleKey('g', key)
         }
       }
     }),
   )
 
-  function handleKey(lowerKey) {
+  function handleKey(key) {
+    var lowerKey = key.toLowerCase()
     if (['r', 's', 'g'].includes(lowerKey)) {
       // Start a transform operation and clear any previous numeric input.
       transformState.mode = lowerKey === 'r' ? 'rotate' : lowerKey === 's' ? 'scale' : 'translate'
@@ -258,7 +276,7 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
       transformState.axis = transformState.axis === lowerKey ? null : lowerKey
       console.log('Axis:', transformState.axis)
       updateTransform()
-    } else if (key === 'Backspace') {
+    } else if (lowerKey === 'backspace') {
       if (transformState.inputStr.length > 0) {
         transformState.inputStr = transformState.inputStr.slice(0, -1)
       }
@@ -305,9 +323,8 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
   scene.actionManager.registerAction(
     new ExecuteCodeAction(ActionManager.OnKeyDownTrigger, function (evt) {
       var key = evt.sourceEvent.key
-      var lowerKey = key.toLowerCase()
 
-      handleKey(lowerKey)
+      handleKey(key)
     }),
   )
 

@@ -1,235 +1,398 @@
-import SD_LIB from "./sd-lib"
-import { MAX_BYTECODE_LENGTH, MAT_SIZE } from "./defaults";
+// Subset of SD_LIB for reference {
+//     "DISTANCE_FUNCTIONS": {
+//         "sdSphere": {
+//             "title": "Sphere",
+//             "fn_name": "sdSphere",
+//             "extra_info": "exact",
+//             "args": {
+//                 "p": "vec3f",
+//                 "r": "f32"
+//             },
+//             "returns": "f32",
+//             "body": "return length(p) - r;",
+//             "thumb": ""
+//         },
+//         "sdEllipsoid": {
+//             "title": "Ellipsoid",
+//             "fn_name": "sdEllipsoid",
+//             "extra_info": "bound (not exact)",
+//             "args": {
+//                 "p": "vec3f",
+//                 "r": "vec3f"
+//             },
+//             "returns": "f32",
+//             "body": "let k0 = length(p / r);\n  let k1 = length(p / (r * r));\n  return k0 * (k0 - 1.) / k1;",
+//             "thumb": ""
+//         }
+//     },
+//     "BOOLEAN_OPS": {
+//         "opUnion": {
+//             "title": "Union",
+//             "fn_name": "opUnion",
+//             "extra_info": "exact (outside)",
+//             "args": {
+//                 "d1": "f32",
+//                 "d2": "f32"
+//             },
+//             "returns": "f32",
+//             "body": "return min(d1, d2);",
+//             "thumb": ""
+//         },
+//         "opSubtract": {
+//             "title": "Subtraction",
+//             "fn_name": "opSubtract",
+//             "extra_info": "bound",
+//             "args": {
+//                 "d1": "f32",
+//                 "d2": "f32"
+//             },
+//             "returns": "f32",
+//             "body": "return max(d1, -d2);",
+//             "thumb": ""
+//         }
+//     },
+//     "DISPLACEMENT_OPS": {
+//         "opDisplace": {
+//             "title": "Displacement",
+//             "fn_name": "opDisplace",
+//             "extra_info": "bound (not exact)",
+//             "args": {
+//                 "d1": "f32",
+//                 "d2": "f32"
+//             },
+//             "returns": "f32",
+//             "body": "return d1 + d2;",
+//             "thumb": ""
+//         },
+//         "opTwist": {
+//             "title": "Twist",
+//             "fn_name": "opTwist",
+//             "extra_info": "bound",
+//             "args": {
+//                 "p": "vec3f",
+//                 "k": "f32"
+//             },
+//             "returns": "vec3f",
+//             "body": "let s = sin(k * p.y);\n  let c = cos(k * p.y);\n  let m = mat2x2<f32>(vec2f(c, s), vec2f(-s, c));\n  return vec3f(m * p.xz, p.y);",
+//             "thumb": ""
+//         }
+//     },
+//     "POSITIONING_OPS": {
+//         "opTranslate": {
+//             "title": "Translate",
+//             "fn_name": "opTranslate",
+//             "extra_info": "exact",
+//             "args": {
+//                 "p": "vec3f",
+//                 "t": "vec3f"
+//             },
+//             "returns": "vec3f",
+//             "body": "return p - t;",
+//             "thumb": ""
+//         },
+//         "op90RotateX": {
+//             "title": "90 degree rotation: op90RotateX",
+//             "fn_name": "op90RotateX",
+//             "extra_info": "exact",
+//             "args": {
+//                 "p": "vec3f"
+//             },
+//             "returns": "vec3f",
+//             "body": "return vec3f(p.x, p.z, -p.y);",
+//             "thumb": ""
+//         },
+//          opInfArray: {
+//              title: 'Infinite Repetition',
+//              fn_name: 'opInfArray',
+//              extra_info: 'exact',
+//              args: {
+//                p: 'vec3f',
+//                c: 'vec3f',
+//              },
+//              returns: 'vec3f',
+//              body: 'return p - c * round(p / c);',
+//              thumb: '',
+//            },
+//            opLimArray: {
+//              title: 'Finite Repetition',
+//              fn_name: 'opLimArray',
+//              extra_info: 'exact',
+//              args: {
+//                p: 'vec3f',
+//                c: 'f32',
+//                lim: 'vec3f',
+//              },
+//              returns: 'vec3f',
+//              body: 'return p - c * clamp(round(p / c), -lim, lim);',
+//              thumb: '',
+//            }
+//     },
+//     "PRIMITIVE_OPS": {
+//         "opElongate": {
+//             "title": "Elongation: opElongate",
+//             "fn_name": "opElongate",
+//             "extra_info": "exact",
+//             "args": {
+//                 "p": "vec3f",
+//                 "h": "vec3f"
+//             },
+//             "returns": "vec3f",
+//             "body": "return p - clamp(p, -h, h);",
+//             "thumb": ""
+//         },
+//         "opElongateCorrect": {
+//             "title": "Elongation: opElongateCorrect",
+//             "fn_name": "opElongateCorrect",
+//             "extra_info": "exact",
+//             "args": {
+//                 "p": "vec3f",
+//                 "h": "vec3f"
+//             },
+//             "returns": "vec4f",
+//             "body": "let q = abs(p) - h;\n  let sgn = 2. * step(vec3f(0.), p) - vec3f(1.);\n  return vec4f(sgn * max(q, vec3f(0.)), min(max(q.x, max(q.y, q.z)), 0.));",
+//             "thumb": ""
+//         }
+//     }
+// }
 
+import SD_LIB from './sd-lib'
+import { MAX_BYTECODE_LENGTH, MAT_SIZE } from './defaults'
+import { explainBytecode, getTypeInfo } from './helpers'
 
 function generateFunctionDef(libEntry) {
-    const args = Object.entries(libEntry.args)
-        .map(([name, type]) => `${name}: ${type}`)
-        .join(", ");
-    return `fn ${libEntry.fn_name}(${args}) -> ${libEntry.returns} {
+  const args = Object.entries(libEntry.args)
+    .map(([name, type]) => `${name}: ${type}`)
+    .join(', ')
+  return `fn ${libEntry.fn_name}(${args}) -> ${libEntry.returns} {
   ${libEntry.body}
-}`;
+}`
 }
 
-export function generateWGSL(scene) {
+export function generateWGSL(
+  scene,
+  { compile_static = false, use_babylon_uniform_init = true } = {},
+) {
+  scene = scene.root
+  let scene_ops = new Set()
 
-    scene = scene.root
-    let scene_ops = new Set()
-    for (let key of Object.keys(SD_LIB.DISTANCE_FUNCTIONS)){
-        scene_ops.add(key)
+  if (!compile_static) {
+    for (let key of Object.keys(SD_LIB.DISTANCE_FUNCTIONS)) {
+      scene_ops.add(key)
     }
-    for (let key of Object.keys(SD_LIB.BOOLEAN_OPS)){
-        scene_ops.add(key)
+    for (let key of Object.keys(SD_LIB.PRIMITIVE_OPS)) {
+      scene_ops.add(key)
     }
-    function collectUsageDetails(node) {
-        scene_ops.add(node.op);
-        if (node.children) {
-            node.children.forEach(child => collectUsageDetails(child));
-        }
-        if (node.modifiers){
-            node.modifiers.forEach(modifier => scene_ops.add(modifier.op))
-        }
+    for (let key of Object.keys(SD_LIB.BOOLEAN_OPS)) {
+      scene_ops.add(key)
     }
-    collectUsageDetails(scene);
+    for (let key of Object.keys(SD_LIB.POSITIONING_OPS)) {
+      scene_ops.add(key)
+    }
+  }
 
-    // Mapping of operation names to numeric opcodes.
-    // Ranges:
-    //   [0,100): shapes
-    //   [100,200): operators (point warping, if any)
-    //   [200,300): booleans (operate on distance values)
-    //   [300,+): program instructions (stack/context management)
-    // start your boolean opcode base at 200
-    const booleanBase = 200;
-const displacementBase = 300;
-const positioningBase = 400;
-    const opMap = {
-        // Shapes:
-        ...Object.fromEntries(Object.keys(SD_LIB.DISTANCE_FUNCTIONS).map((op, i) => [op, i])),
-        // Operators:
-        infiniteRepetition: 100,
-        // Booleans:
-        ...Object.keys(SD_LIB.BOOLEAN_OPS).reduce((m, opName, idx) => {
-            m[opName] = booleanBase + idx;
-            return m;
-        }, {}),
-        ...Object.keys(SD_LIB.DISPLACEMENT_OPS).reduce((m, opName, idx) => {
-            m[opName] = displacementBase + idx;
-            return m;
-        }, {}),
-        ...Object.keys(SD_LIB.POSITIONING_OPS).reduce((m, opName, idx) => {
-            m[opName] = positioningBase + idx;
-            return m;
-        }, {}),
-        // Context management:
-        pushTranslate: 300,
-        popContext: 301,
-    };
+  function collectUsageDetails(node) {
+    scene_ops.add(node.op)
+    if (node.children) {
+      node.children.forEach((child) => collectUsageDetails(child))
+    }
+    if (node.modifiers) {
+      node.modifiers.forEach((modifier) => scene_ops.add(modifier.op))
+    }
+  }
+  collectUsageDetails(scene)
 
-    function compileNode(node) {
-        let bytecode = [];
+  // Mapping of operation names to numeric opcodes.
+  // Ranges:
+  //   [0,100): shapes
+  //   [100,200): operators (point warping, if any)
+  //   [200,300): booleans (operate on distance values)
+  //   [300,+): program instructions (stack/context management)
+  // start your boolean opcode base at 200
+  const booleanBase = 200
+  const displacementBase = 300
+  const positioningBase = 400
+  const opMap = {
+    // Shapes:
+    ...Object.fromEntries(Object.keys(SD_LIB.DISTANCE_FUNCTIONS).map((op, i) => [op, i])),
+    // Booleans:
+    ...Object.keys(SD_LIB.BOOLEAN_OPS).reduce((m, opName, idx) => {
+      m[opName] = booleanBase + idx
+      return m
+    }, {}),
+    ...Object.keys(SD_LIB.DISPLACEMENT_OPS).reduce((m, opName, idx) => {
+      m[opName] = displacementBase + idx
+      return m
+    }, {}),
+    ...Object.keys(SD_LIB.POSITIONING_OPS).reduce((m, opName, idx) => {
+      m[opName] = positioningBase + idx
+      return m
+    }, {}),
+    // Context management:
+    pushTranslate: 300,
+    popContext: 301,
+  }
+  function compileNode(node) {
+    let bytecode = []
 
-            // 1) Modifiers: any point‐warp / positioning op or repetition
-        if (node.modifiers?.length) {
-            for (const mod of node.modifiers) {
-                // — Positioning ops (opTranslate, op90RotateX, …):
-                const posDef = SD_LIB.POSITIONING_OPS[mod.op];
-                if (posDef) {
-                    // push the opcode
-                    bytecode.push(opMap[mod.op]);
-                    // then each of its args (in declaration order, skipping 'p')
-                    for (const [argName] of Object.entries(posDef.args)) {
-                        if (argName === 'p') continue;
-                        const v = mod.args[argName];
-                        if (Array.isArray(v)) bytecode.push(...v);
-                        else bytecode.push(v);
-                    }
-                }
-            }
+    // — 1) Emit any transforms in node.modifiers —
+    //     these push a new point+scale context
+    if (node.modifiers) {
+      for (const mod of node.modifiers) {
+        const posDef = SD_LIB.POSITIONING_OPS[mod.op]
+        if (!posDef) continue
+        bytecode.push(opMap[mod.op])
+        for (const [argName] of Object.entries(posDef.args)) {
+          if (argName === 'p') continue
+          const v = mod.args[argName]
+          bytecode.push(...(Array.isArray(v) ? v : [v]))
         }
-
-        // 2) Boolean operators (union, subtract, intersect, chamfer, smooth…)
-        const boolDef = SD_LIB.BOOLEAN_OPS[node.op];
-        if (boolDef && node.children?.length > 0) {
-            // We compile RPN style: child₀, child₁, OP, child₂, OP, …
-            // So start with first child
-            let acc = compileNode(node.children[0]);
-
-            // For each subsequent child, compile it, then emit the operator + its extra param if any
-            for (let i = 1; i < node.children.length; i++) {
-                acc = acc.concat(compileNode(node.children[i]));
-                acc.push(opMap[node.op]);
-                // if this boolean op takes an extra float (e.g. 'k' or 'r'), push it now:
-                const extraKeys = Object.keys(boolDef.args).filter(a => 'd1,d2'.split(',').indexOf(a) === -1);
-                if (extraKeys.length === 1) {
-                    const v = node.args?.[extraKeys[0]];
-                    acc.push(Array.isArray(v) ? v[0] : v);
-                }
-            }
-
-            bytecode = bytecode.concat(acc);
-
-        } else {
-            // 3) Non‐boolean: first compile any children (e.g. a “transform then leaf” pattern)
-            if (node.children?.length) {
-                for (const child of node.children) {
-                    bytecode = bytecode.concat(compileNode(child));
-                }
-            }
-
-            // 4) Leaf ops: distance functions, displacements, primitives…
-            const fnDef = SD_LIB.DISTANCE_FUNCTIONS[node.op]
-                || SD_LIB.DISPLACEMENT_OPS[node.op]
-                || SD_LIB.POSITIONING_OPS[node.op]
-                || SD_LIB.PRIMITIVE_OPS[node.op];
-
-            if (fnDef) {
-                // push the opcode
-                bytecode.push(opMap[node.op]);
-
-                // push each argument in declaration order (skip the implicit 'p')
-                for (const [argName, _type] of Object.entries(fnDef.args)) {
-                    if (argName === 'p') continue;
-                    const val = node.args?.[argName];
-                    if (Array.isArray(val)) bytecode.push(...val);
-                    else if (val !== undefined) bytecode.push(val);
-                    else throw new Error(`Missing arg ${argName} for ${node.op}`);
-                }
-
-                // push material rgba + shapeID
-                const { r = 1, g = 1, b = 1, a = 1 } = node.material || {};
-                bytecode.push(r, g, b, a);
-
-                const id = node.id
-                bytecode.push(id);
-
-            } else if (opMap[node.op] != null) {
-                // some other single‐token op
-                bytecode.push(opMap[node.op]);
-
-            } else {
-                console.warn(`Unknown op in compileNode: ${node.op}`);
-            }
-        }
-
-        // 5) Pop context for each modifier
-        if (node.modifiers?.length) {
-            for (let i = 0; i < node.modifiers.length; i++) {
-                bytecode.push(opMap.popContext);
-            }
-        }
-
-        return bytecode;
+      }
     }
 
+    // — 2) Boolean ops (union, smooth, etc) —
+    const boolDef = SD_LIB.BOOLEAN_OPS[node.op]
+    if (boolDef && node.children?.length > 0) {
+      // RPN style: child₀ child₁ OP child₂ OP …
+      let acc = compileNode(node.children[0])
+      for (let i = 1; i < node.children.length; i++) {
+        acc = acc.concat(compileNode(node.children[i]))
+        acc.push(opMap[node.op])
+        // extra float parameter?
+        const extra = Object.keys(boolDef.args).filter((a) => a !== 'd1' && a !== 'd2')
+        if (extra.length === 1) {
+          const v = node.args?.[extra[0]]
+          acc.push(...(Array.isArray(v) ? v : [v]))
+        }
+      }
+      bytecode = bytecode.concat(acc)
+    } else {
+      // — 3) Non-boolean: compile any children first —
+      if (node.children) {
+        for (const child of node.children) {
+          bytecode = bytecode.concat(compileNode(child))
+        }
+      }
 
+      // — 4) Leaf op: distance, displacement, primitive, or standalone operator —
+      const fnDef =
+        SD_LIB.DISTANCE_FUNCTIONS[node.op] ||
+        SD_LIB.DISPLACEMENT_OPS[node.op] ||
+        SD_LIB.PRIMITIVE_OPS[node.op]
 
-    const bytecodeArray = compileNode(scene);
-    const bytecodeStr = bytecodeArray.join(', ');
-    const programLength = bytecodeArray.length;
-    const maxProgramLength = MAX_BYTECODE_LENGTH
+      if (fnDef) {
+        bytecode.push(opMap[node.op])
+        for (const [argName] of Object.entries(fnDef.args)) {
+          if (argName === 'p') continue
+          const v = node.args?.[argName]
+          bytecode.push(...(Array.isArray(v) ? v : [v]))
+        }
+        // push material (r,g,b,a) + shapeID
+        const { r = 1, g = 1, b = 1, a = 1 } = node.material || {}
+        bytecode.push(r, g, b, a, node.id)
+      } else if (opMap[node.op] != null) {
+        // odd single-token ops
+        bytecode.push(opMap[node.op])
+      }
+    }
 
-    // Build the WGSL code as a template string.
-    const wgslCode =
-        `// Auto-generated WGSL code with material and shape index tracking
+    // — 5) Pop one context per modifier —
+    if (node.modifiers) {
+      for (let i = 0; i < node.modifiers.length; i++) {
+        bytecode.push(opMap.popContext)
+      }
+    }
+
+    return bytecode
+  }
+
+  const bytecodeArray = compileNode(scene)
+  const bytecodeStr = bytecodeArray.join(', ')
+  const programLength = bytecodeArray.length
+  const maxProgramLength = MAX_BYTECODE_LENGTH
+
+  // Build the WGSL code as a template string.
+  var wgslCode = `
+  ${
+    compile_static && use_babylon_uniform_init
+      ? `
+    // const shader_bytecode = new Float32Array([${bytecodeArray.join(', ')}])
+    // effect.setFloatArray('program', shader_bytecode)
+    `
+      : ''
+  }
+  // Auto-generated WGSL code with material and shape index tracking
 
 ///////////////////////////////////////////
 // Structures and Bytecode Definition
 ///////////////////////////////////////////
 
 struct SdResult {
-  dist: f32,
-  color: vec4<f32>,
-  shapeID: u32,
+  dist:   f32,
+  normal: vec3<f32>,
+  ao:     f32,
+  color:  vec4<f32>,
+  shapeID:u32,
 };
 
 
-// // Flat bytecode program.
-// const program : array<f32, ${maxProgramLength}> = array<f32, ${maxProgramLength}>(${bytecodeStr});
+
+${
+  compile_static && !use_babylon_uniform_init
+    ? `//Flat bytecode program.
+const programLength = ${programLength}u;
+var<private> program = array<f32, ${programLength}>(${bytecodeStr});`
+    : ''
+}
 
 ///////////////////////////////////////////
 // Opcode Definitions
 ///////////////////////////////////////////
 
-${Object.entries(opMap).filter(([k, v]) => (k.startsWith("sd") || k.startsWith("op")) && scene_ops.has(k)).map(([fn, number]) => `const OP_${toUpperSnakeCase(fn)} : i32 = ${number};`).join("\n")}
+${Object.entries(opMap)
+  .filter(([k, v]) => scene_ops.has(k))
+  .map(([fn, number]) => `const OP_${toUpperSnakeCase(fn)} : i32 = ${number};`)
+  .join('\n')}
 
-// const OP_INFINITE_REPETITION : i32 = ${opMap.infiniteRepetition};
-// const OP_UNION : i32 = ${opMap.opUnion};
-// const OP_SUBTRACT : i32 = ${opMap.opSubtract};
-// const OP_SMOOTH_UNION : i32 = ${opMap.opSmoothUnion};
-// const OP_SMOOTH_SUBTRACT : i32 = ${opMap.opSmoothSubtract};
-// const OP_PUSH_TRANSLATE : i32 = ${opMap.pushTranslate};
 const OP_POP_CONTEXT : i32 = ${opMap.popContext};
 
 ///////////////////////////////////////////
 // Runtime Stacks and Context
 ///////////////////////////////////////////
 
-// Distance-only evaluation stack.
-var<private> evalStack : array<f32, 64>;
-var<private> stackPtr : i32 = 0;
+// distance‐only evaluation
+var<private> evalStack      : array<f32, 64>;
+var<private> stackPtr       : i32 = 0;
 
-// Result stack for material and shape index tracking.
-var<private> resultStack : array<SdResult, 64>;
+// material + shapeID
+var<private> resultStack    : array<SdResult, 64>;
 var<private> resultStackPtr : i32 = 0;
 
-// Stack for point transformations.
-var<private> pointStack : array<vec3<f32>, 16>;
-var<private> ptStackPtr : i32 = 0;
+// pack position.xyz + scale in .w
+var<private> pointStack     : array<vec4<f32>, 16>;
+var<private> ptStackPtr     : i32       = 0;
 
-// The current working point.
-var<private> currentP : vec3<f32>;
+// current working point & its accumulated scale
+var<private> currentP       : vec3<f32>;
+var<private> currentScale   : f32       = 1.0;
+
 
 ///////////////////////////////////////////
 // Generated Function Definitions
 ///////////////////////////////////////////
 
-${Object.entries(SD_LIB).map(([category_key, category]) =>
-            Object.keys(category).map(opName => {
-                if (!(scene_ops.has(opName))) return
-                let def = generateFunctionDef(SD_LIB[category_key][opName]);
-                return def;
-            }).filter(Boolean).join("\n\n")).filter(Boolean).join("\n\n")
-        }
+${Object.entries(SD_LIB)
+  .map(([category_key, category]) =>
+    Object.keys(category)
+      .map((opName) => {
+        if (!scene_ops.has(opName)) return
+        let def = generateFunctionDef(SD_LIB[category_key][opName])
+        return def
+      })
+      .filter(Boolean)
+      .join('\n\n'),
+  )
+  .filter(Boolean)
+  .join('\n\n')}
            
 
 ///////////////////////////////////////////
@@ -256,120 +419,165 @@ fn selectSdResult(a: SdResult, b: SdResult, cond: bool) -> SdResult {
 
 fn sdRpn(initialP: vec3<f32>) -> f32 {
 
-
-  var pc: u32 = 0u;
-  currentP = initialP;
-  ptStackPtr = 0;
-  stackPtr = 0;
+  var pc: u32       = 0u;
+  currentP          = initialP;
+  ptStackPtr        = 0;
+  stackPtr          = 0;
+  currentScale      = 1.0;
   
   while (pc < uniforms.programLength) {
     let opcode = i32(uniforms.program[pc]);
     pc = pc + 1u;
     switch(opcode) {
 
-    //   case OP_INFINITE_REPETITION: {
-    //     let px = uniforms.program[pc];
-    //     let py = uniforms.program[pc + 1u];
-    //     let pz = uniforms.program[pc + 2u];
-    //     pc = pc + 3u;
-    //     pointStack[ptStackPtr] = currentP;
-    //     ptStackPtr = ptStackPtr + 1;
-    //     currentP = opInfArray(currentP, vec3<f32>(px, py, pz));
-    //   }
       case OP_POP_CONTEXT: {
         ptStackPtr = ptStackPtr - 1;
-        currentP = pointStack[ptStackPtr];
+        let packed   = pointStack[ptStackPtr];
+        currentP     = packed.xyz;
+        currentScale = packed.w;
+        break;
       }
-      ${Object.entries(opMap).filter(([k, v]) => k.startsWith("sd") && scene_ops.has(k)).map(([fn, number]) => generateSwitchCaseBlock(SD_LIB.DISTANCE_FUNCTIONS[fn])).join("\n")}
-      ${Object.entries(opMap).filter(([k, v]) => k in SD_LIB.BOOLEAN_OPS && scene_ops.has(k))
-            .map(([fn, number]) => generateBooleanSwitchCaseBlock(SD_LIB.BOOLEAN_OPS[fn], false)).join("\n")}
       ${Object.entries(opMap)
-            .filter(([k,v]) => scene_ops.has(k) && SD_LIB.POSITIONING_OPS[k])
-            .map(([fn,number]) => generatePositioningSwitchCaseBlock(SD_LIB.POSITIONING_OPS[fn]))
-            .join("\n")}
+        .filter(([k, v]) => k.startsWith('sd') && scene_ops.has(k))
+        .map(([fn, number]) => generateSwitchCaseBlock(SD_LIB.DISTANCE_FUNCTIONS[fn]))
+        .join('\n')}
+      ${Object.entries(opMap)
+        .filter(([k, v]) => k in SD_LIB.BOOLEAN_OPS && scene_ops.has(k))
+        .map(([fn, number]) => generateBooleanSwitchCaseBlock(SD_LIB.BOOLEAN_OPS[fn], false))
+        .join('\n')}
+      ${Object.entries(opMap)
+        .filter(([k, v]) => scene_ops.has(k) && SD_LIB.POSITIONING_OPS[k])
+        .map(([fn, number]) => generatePositioningSwitchCaseBlock(SD_LIB.POSITIONING_OPS[fn]))
+        .join('\n')}
       default: { }
     }
   }
-  return evalStack[0];
+  let raw = evalStack[0];
+  return raw * currentScale;
 }
 
 ///////////////////////////////////////////
-// New Raymarcher: Returns Material and Pickable Shape ID
+// Ambient‐Occlusion Helpers
+///////////////////////////////////////////
+
+fn hash(x: f32) -> f32 {
+  return fract(sin(x * 127.1) * 43758.5453123);
+}
+
+fn randomSphereDir(rnd: vec2<f32>) -> vec3<f32> {
+  let s = rnd.x * 6.28318530718;      // 2π
+  let t = rnd.y * 2.0 - 1.0;          // cosθ
+  return vec3<f32>(sin(s), cos(s), t) / sqrt(1.0 + t * t);
+}
+
+fn randomHemisphereDir(n: vec3<f32>, seed: f32) -> vec3<f32> {
+  let rnd = vec2<f32>(hash(seed + 1.0), hash(seed + 2.0));
+  let v   = randomSphereDir(rnd);
+  return v * sign(dot(v, n));
+}
+
+
+///////////////////////////////////////////
+// Material‐aware Raymarcher (with AO & normal)
 ///////////////////////////////////////////
 
 fn sdRpnMaterial(initialP: vec3<f32>) -> SdResult {
+  var pc: u32           = 0u;
+  currentP              = initialP;
+  ptStackPtr            = 0;
+  resultStackPtr        = 0;
+  currentScale          = 1.0;
 
-  var pc: u32 = 0u;
-  currentP = initialP;
-  ptStackPtr = 0;
-  resultStackPtr = 0;
   
   while (pc < uniforms.programLength) {
     let opcode = i32(uniforms.program[pc]);
     pc = pc + 1u;
     switch(opcode) {
-    //   case OP_PUSH_TRANSLATE: {
-    //     let tx = uniforms.program[pc];
-    //     let ty = uniforms.program[pc + 1u];
-    //     let tz = uniforms.program[pc + 2u];
-    //     pc = pc + 3u;
-    //     pointStack[ptStackPtr] = currentP;
-    //     ptStackPtr = ptStackPtr + 1;
-    //     currentP = currentP - vec3<f32>(tx, ty, tz);
-    //   }
-    //   case OP_INFINITE_REPETITION: {
-    //     let px = uniforms.program[pc];
-    //     let py = uniforms.program[pc + 1u];
-    //     let pz = uniforms.program[pc + 2u];
-    //     pc = pc + 3u;
-    //     pointStack[ptStackPtr] = currentP;
-    //     ptStackPtr = ptStackPtr + 1;
-    //     currentP = opInfArray(currentP, vec3<f32>(px, py, pz));
-    //   }
-      case OP_POP_CONTEXT: {
+  
+        case OP_POP_CONTEXT: {
         ptStackPtr = ptStackPtr - 1;
-        currentP = pointStack[ptStackPtr];
+        let packed   = pointStack[ptStackPtr];
+        currentP     = packed.xyz;
+        currentScale = packed.w;
+        break;
       }
-     ${Object.entries(opMap).filter(([k, v]) => k.startsWith("sd") && scene_ops.has(k))
-            .map(([fn, number]) => generateSwitchCaseBlock(SD_LIB.DISTANCE_FUNCTIONS[fn], true)).join("\n")}
-      ${Object.entries(opMap).filter(([k, v]) => k in SD_LIB.BOOLEAN_OPS && scene_ops.has(k))
-            .map(([fn, number]) => generateBooleanSwitchCaseBlock(SD_LIB.BOOLEAN_OPS[fn], true)).join("\n")}
+     ${Object.entries(opMap)
+       .filter(([k, v]) => k.startsWith('sd') && scene_ops.has(k))
+       .map(([fn, number]) => generateSwitchCaseBlock(SD_LIB.DISTANCE_FUNCTIONS[fn], true))
+       .join('\n')}
       ${Object.entries(opMap)
-    .filter(([k,v]) => scene_ops.has(k) && SD_LIB.POSITIONING_OPS[k])
-    .map(([fn,number]) => generatePositioningSwitchCaseBlock(SD_LIB.POSITIONING_OPS[fn]))
-    .join("\n")}
+        .filter(([k, v]) => k in SD_LIB.BOOLEAN_OPS && scene_ops.has(k))
+        .map(([fn, number]) => generateBooleanSwitchCaseBlock(SD_LIB.BOOLEAN_OPS[fn], true))
+        .join('\n')}
+      ${Object.entries(opMap)
+        .filter(([k, v]) => scene_ops.has(k) && SD_LIB.POSITIONING_OPS[k])
+        .map(([fn, number]) => generatePositioningSwitchCaseBlock(SD_LIB.POSITIONING_OPS[fn]))
+        .join('\n')}
       default: { }
     }
   }
-  return resultStack[0];
+   // pull out the raw result and apply the global scale
+  var out = resultStack[0];
+
+  // 1) compute world‐space normal by finite differences
+  let eps: f32 = 1e-3;
+  let nx = sdRpn(initialP + vec3<f32>(eps,0,0)) - sdRpn(initialP - vec3<f32>(eps,0,0));
+  let ny = sdRpn(initialP + vec3<f32>(0,eps,0)) - sdRpn(initialP - vec3<f32>(0,eps,0));
+  let nz = sdRpn(initialP + vec3<f32>(0,0,eps)) - sdRpn(initialP - vec3<f32>(0,0,eps));
+  let N  = normalize(vec3<f32>(nx, ny, nz));
+
+  // 2) hemisphere AO in local SDF‐space
+  let NUM_SAMPLES: i32 = 16;
+  let MAX_DIST:    f32 = 0.1;
+  let invNum:      f32 = 1.0 / f32(NUM_SAMPLES);
+  let rad:         f32 = 1.0 - invNum;
+  var aoAcc:       f32 = 0.0;
+
+  for (var i: i32 = 0; i < NUM_SAMPLES; i = i + 1) {
+    let fi: f32 = f32(i);
+    let l  = hash(fi) * MAX_DIST;
+    let hemi = randomHemisphereDir(N, fi);
+    let dir  = normalize(N + hemi * rad);
+    // sample in *local* space
+    let d = max(sdRpn(initialP + dir * l), 0.0);
+    aoAcc = aoAcc + (l - d) / MAX_DIST;
+  }
+  let ao = clamp(1.0 - aoAcc * invNum, 0.0, 1.0);
+
+  // 3) write back into the result
+  out.normal = N;
+  out.ao     = ao;
+  return out;
 }
-`;
-    // console.log(wgslCode)
-    return { code: wgslCode, program: bytecodeArray, programLength };
+`
+  if (compile_static) wgslCode = wgslCode.replaceAll('uniforms.program', 'settings.program')
+  explainBytecode(bytecodeArray, opMap)
+  // console.log(wgslCode)
+  return { code: wgslCode, program: bytecodeArray, programLength }
 }
 
 function toUpperSnakeCase(name) {
-    return name
-        .replace(/([a-z0-9])([A-Z])/g, "$1_$2") // insert _ between lowercase and uppercase
-        .toUpperCase();
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2') // insert _ between lowercase and uppercase
+    .toUpperCase()
 }
 
 function floatCountForType(type) {
-    switch (type) {
-        case "f32":
-            return 1;
-        case "vec2f":
-            return 2;
-        case "vec3f":
-            return 3;
-        case "vec4f":
-            return 4;
-        case "mat4x4<f32>":
-            return 16;
-        default:
-            console.warn(`Unknown float count for '${type}'.`)
-            return 1;
-    }
+  switch (type) {
+    case 'f32':
+      return 1
+    case 'vec2f':
+      return 2
+    case 'vec3f':
+      return 3
+    case 'vec4f':
+      return 4
+    case 'mat4x4<f32>':
+      return 16
+    default:
+      console.warn(`Unknown float count for '${type}'.`)
+      return 1
+  }
 }
 
 /**
@@ -405,102 +613,98 @@ function floatCountForType(type) {
  */
 
 function generateSwitchCaseBlock(operation, mat_variant = false) {
-    // Helper: determine how many program-floats a type consumes.
+  // Helper: determine how many program-floats a type consumes.
 
+  // Start building the switch-case block.
+  // We assume the opcode constant is named using the operation function name in uppercase.
+  const opConstant = `OP_${toUpperSnakeCase(operation.fn_name)}`
+  const codeLines = []
+  codeLines.push(`case ${opConstant}: {`)
 
-    // Start building the switch-case block.
-    // We assume the opcode constant is named using the operation function name in uppercase.
-    const opConstant = `OP_${toUpperSnakeCase(operation.fn_name)}`;
-    const codeLines = [];
-    codeLines.push(`case ${opConstant}: {`);
+  // Array to collect the parameters that will be passed to the function call.
+  const callArguments = []
 
-    // Array to collect the parameters that will be passed to the function call.
-    const callArguments = [];
-
-    // Process each argument in the order provided.
-    // (In modern JavaScript, the order of keys is preserved as inserted.)
-    for (const [argName, argType] of Object.entries(operation.args)) {
-        // If argument is "p" of type "vec3f", use the implicit WGSL variable.
-        if (argName === "p" && argType === "vec3f") {
-            callArguments.push("currentP");
-        } else {
-            const count = floatCountForType(argType);
-            if (count === 1) {
-                // Single f32 value.
-                codeLines.push(`  let ${argName} = uniforms.program[pc];`);
-                codeLines.push(`  pc = pc + 1u;`);
-            } else {
-                // For vector types build a vec constructor
-                const components = [];
-                for (let i = 0; i < count; i++) {
-                    components.push(`uniforms.program[pc + ${i}u]`);
-                }
-                codeLines.push(`  let ${argName} = vec${count}<f32>(${components.join(", ")});`);
-                codeLines.push(`  pc = pc + ${count}u;`);
-            }
-            callArguments.push(argName);
-        }
+  // Process each argument in the order provided.
+  // (In modern JavaScript, the order of keys is preserved as inserted.)
+  for (const [argName, argType] of Object.entries(operation.args)) {
+    if (argName === 'p' && argType === 'vec3f') {
+      // implicit
+      callArguments.push('currentP')
+    } else {
+      // read any scalar/vector/matrix uniformly
+      codeLines.push(readUniform(argType, argName))
+      callArguments.push(argName)
     }
+  }
 
-    // Special handling: if this operation is a leaf shape (here we use sdSphere as our example),
-    // then after reading its arguments, we also need to skip over the 5 extra floats (e.g. material and shapeID).
-    // In a more general solution, you might have an extra flag or convention to trigger this.
-    if (mat_variant) {
-        codeLines.push(`
-        ${new Array(MAT_SIZE - 1).fill(0).map((e, i) => `let m${i} = uniforms.program[pc + ${i}u];`).join("\n        ")}
+  // Special handling: if this operation is a leaf shape (here we use sdSphere as our example),
+  // then after reading its arguments, we also need to skip over the 5 extra floats (e.g. material and shapeID).
+  // In a more general solution, you might have an extra flag or convention to trigger this.
+  if (mat_variant) {
+    codeLines.push(`
+        ${new Array(MAT_SIZE - 1)
+          .fill(0)
+          .map((e, i) => `let m${i} = uniforms.program[pc + ${i}u];`)
+          .join('\n        ')}
         pc = pc + ${MAT_SIZE - 1}u;
         let shape_id_f = uniforms.program[pc];
         pc = pc + 1u;
         let shape_id = u32(shape_id_f);`)
-    } else {
-        codeLines.push(`  // Skip over material and shape id.`);
-        codeLines.push(`  pc = pc + ${MAT_SIZE}u;`);
-    }
+  } else {
+    codeLines.push(`  // Skip over material and shape id.`)
+    codeLines.push(`  pc = pc + ${MAT_SIZE}u;`)
+  }
 
-    // Build the function call.
-    // If the return type is "f32", the result is pushed onto the evalStack.
-    // Otherwise, assume it returns a structured value (e.g. SdResult) and push it onto the resultStack.
+  // Build the function call.
+  // If the return type is "f32", the result is pushed onto the evalStack.
+  // Otherwise, assume it returns a structured value (e.g. SdResult) and push it onto the resultStack.
 
-    if (mat_variant) {
-        codeLines.push(`  let d = ${operation.fn_name}(${callArguments.join(", ")});`);
-        codeLines.push(`  resultStack[resultStackPtr] = SdResult(d, vec4<f32>(m0, m1, m2, m3), shape_id);`)
-        codeLines.push(`  resultStackPtr = resultStackPtr + 1;`)
+  if (mat_variant) {
+    // compute in local space…
+    codeLines.push(`  let d_local = ${operation.fn_name}(${callArguments.join(', ')});`)
+    // …then convert to world space
+    codeLines.push(`  let d = d_local * currentScale;`)
+    codeLines.push(
+      `  resultStack[resultStackPtr] = SdResult(d, vec3<f32>(0.0, 0.0, 0.0), 1.0, vec4<f32>(m0, m1, m2, m3), shape_id);`,
+    )
+    codeLines.push(`  resultStackPtr = resultStackPtr + 1;`)
+  } else {
+    // compute in local space…
+    codeLines.push(`  let d_local = ${operation.fn_name}(${callArguments.join(', ')});`)
+    // …then convert to world space
+    codeLines.push(`  let d = d_local * currentScale;`)
+    codeLines.push(`  evalStack[stackPtr] = d;`)
+    codeLines.push(`  stackPtr = stackPtr + 1;`)
+  }
 
-    } else {
-        codeLines.push(`  let d = ${operation.fn_name}(${callArguments.join(", ")});`);
-        codeLines.push(`  evalStack[stackPtr] = d;`);
-        codeLines.push(`  stackPtr = stackPtr + 1;`);
-    }
+  // Optionally include a break statement for clarity.
+  codeLines.push(`  break;`)
+  codeLines.push(`}`)
 
-
-
-    // Optionally include a break statement for clarity.
-    codeLines.push(`  break;`);
-    codeLines.push(`}`);
-
-    // Return the complete switch-case block as a string.
-    return codeLines.join("\n");
+  // Return the complete switch-case block as a string.
+  return codeLines.join('\n')
 }
 function generateBooleanSwitchCaseBlock(def, matVariant = false) {
-    const OPC = `OP_${toUpperSnakeCase(def.fn_name)}`;
-    const extraArgs = Object.keys(def.args).filter(a => a !== 'd1' && a !== 'd2');
-    const hasParam = extraArgs.length === 1;
-    const paramName = hasParam ? extraArgs[0] : null;
-    const name = def.fn_name;
+  const OPC = `OP_${toUpperSnakeCase(def.fn_name)}`
+  const extraArgs = Object.keys(def.args).filter((a) => a !== 'd1' && a !== 'd2')
+  const hasParam = extraArgs.length === 1
+  const paramName = hasParam ? extraArgs[0] : null
+  const name = def.fn_name
 
-    // categorize
-    const isUnion = name.endsWith('Union') && !name.startsWith('opSmooth') && !name.startsWith('opChamfer');
-    const isSubtract = name.endsWith('Subtract') && !name.startsWith('opSmooth') && !name.startsWith('opChamfer');
-    const isIntersect = name.endsWith('Intersect') && !name.startsWith('opSmooth') && !name.startsWith('opChamfer');
-    const isChamfer = name.startsWith('opChamfer');
-    const isSmooth = name.startsWith('opSmooth');
+  // categorize
+  const isUnion =
+    name.endsWith('Union') && !name.startsWith('opSmooth') && !name.startsWith('opChamfer')
+  const isSubtract =
+    name.endsWith('Subtract') && !name.startsWith('opSmooth') && !name.startsWith('opChamfer')
+  const isIntersect =
+    name.endsWith('Intersect') && !name.startsWith('opSmooth') && !name.startsWith('opChamfer')
+  const isChamfer = name.startsWith('opChamfer')
+  const isSmooth = name.startsWith('opSmooth')
 
-    const loadParam = hasParam
-        ? `let p0 = uniforms.program[pc];\n  pc += 1u;`
-        : ``;
+  const loadParam = hasParam ? `let p0 = uniforms.program[pc];\n  pc += 1u;` : ``
 
-    if (!matVariant) {
-        return `
+  if (!matVariant) {
+    return `
 case ${OPC}: {
   ${loadParam}
   // pop two distances
@@ -514,11 +718,11 @@ case ${OPC}: {
   stackPtr += 1;
   break;
 }
-`;
-    }
+`
+  }
 
-    // — material variant —
-    return `
+  // — material variant —
+  return `
 case ${OPC}: {
   ${loadParam}
   // pop two results
@@ -534,25 +738,39 @@ case ${OPC}: {
   var color: vec4<f32>;
   var id:    u32;
 
-  ${isUnion ? `
+  ${
+    isUnion
+      ? `
     // exact union: pick nearer branch
     color = select(rb.color, ra.color, ra.dist < rb.dist);
     id    = select(rb.shapeID, ra.shapeID, ra.dist < rb.dist);
-  ` : ''}
+  `
+      : ''
+  }
 
-  ${isSubtract ? `
+  ${
+    isSubtract
+      ? `
     // exact subtraction: always minuend
     color = ra.color;
     id    = ra.shapeID;
-  ` : ''}
+  `
+      : ''
+  }
 
-  ${isIntersect ? `
+  ${
+    isIntersect
+      ? `
     // exact intersection: pick farther branch
     color = select(ra.color, rb.color, ra.dist < rb.dist);
     id    = select(ra.shapeID, rb.shapeID, ra.dist < rb.dist);
-  ` : ''}
+  `
+      : ''
+  }
 
-  ${isChamfer ? `
+  ${
+    isChamfer
+      ? `
     // chamfer: min(d1,d2) vs blend‐region
     let baseWin = ra.dist < rb.dist;
     let chamWin = min(ra.dist, rb.dist) < (ra.dist - p0 + rb.dist) * 0.5;
@@ -563,55 +781,106 @@ case ${OPC}: {
     id    = select(select(rb.shapeID, ra.shapeID, baseWin),
                    select(rb.shapeID, ra.shapeID, baseWin),
                    chamWin);
-  ` : ''}
+  `
+      : ''
+  }
 
-  ${isSmooth ? `
+  ${
+    isSmooth
+      ? `
     // smooth blend
     let h = clamp(0.5 + 0.5 * (rb.dist - ra.dist) / p0, 0.0, 1.0);
     color = mix(rb.color, ra.color, h);
     id    = select(rb.shapeID, ra.shapeID, ra.dist < rb.dist);
-  ` : ''}
+  `
+      : ''
+  }
 
   // push back
-  resultStack[resultStackPtr] = SdResult(dist, color, id);
+  resultStack[resultStackPtr] = SdResult(dist, vec3<f32>(0.0, 0.0, 0.0),  1.0, color, id);
   resultStackPtr += 1;
   break;
 }
-`;
+`
 }
 
 function generatePositioningSwitchCaseBlock(def) {
-  const OPC = `OP_${toUpperSnakeCase(def.fn_name)}`;
-  const argEntries = Object.entries(def.args).filter(([name,_]) => name !== 'p');
+  const fnName = def.fn_name
+  const OPC = `OP_${toUpperSnakeCase(fnName)}`
+  const args = Object.entries(def.args).filter(([n, _]) => n !== 'p')
 
-  let lines = [];
-  lines.push(`case ${OPC}: {`);
-  // 1) read args from uniforms.program
-  let callArgs = ["currentP"];
-  let pcAdvance = 0;
-  for (let [argName, argType] of argEntries) {
-    const cnt = floatCountForType(argType);
-    if (cnt === 1) {
-      lines.push(`  let ${argName} = uniforms.program[pc];`);
-      pcAdvance += 1;
-    } else {
-      const comps = Array.from({length:cnt}, (_,i) => `uniforms.program[pc + ${i}u]`).join(", ");
-      lines.push(`  let ${argName} = vec${cnt}<f32>(${comps});`);
-      pcAdvance += cnt;
+  // count how many floats to read for a given type
+  function floatCount(type) {
+    switch (type) {
+      case 'f32':
+        return 1
+      case 'vec2f':
+        return 2
+      case 'vec3f':
+        return 3
+      case 'vec4f':
+        return 4
+      case 'mat4x4<f32>':
+        return 16
+      default:
+        return 1
     }
-    callArgs.push(argName);
-  }
-  if (pcAdvance > 0) {
-    lines.push(`  pc = pc + ${pcAdvance}u;`);
   }
 
-  // 2) push old point on stack
-  lines.push(`  pointStack[ptStackPtr] = currentP;`);
-  lines.push(`  ptStackPtr = ptStackPtr + 1;`);
+  // start building the case block
+  let code = [`case ${OPC}: {`]
 
-  // 3) warp currentP
-  lines.push(`  currentP = ${def.fn_name}(${callArgs.join(", ")});`);
+  // 1) read all args (for opScale that's just 's')
+  for (let [argName, argType] of args) {
+    code.push(readUniform(argType, argName))
+  }
 
-  lines.push(`  break;`, `}`);
-  return lines.join("\n");
+  // 2) push packed (position.xyz, scale) onto the same stack
+  code.push(`  // pack old position & scale`)
+  code.push(`  pointStack[ptStackPtr] = vec4<f32>(currentP, currentScale);`)
+  code.push(`  ptStackPtr = ptStackPtr + 1;`)
+
+  // 3) apply your warp *and* accumulate any scale
+  if (fnName === 'opScale') {
+    // exactly as before
+    code.push(`  currentP = currentP / s;`)
+    code.push(`  currentScale = currentScale * s;`)
+  } else if (fnName === 'opTransform') {
+    // inverse(transform) is inside your WGSL fn,
+    // but here we extract the *uniform* scale from the matrix itself
+    code.push(`  // extract uniform scale from the local→world basis vector`)
+    code.push(`  let basisX = transform[0].xyz;            // first column`)
+    code.push(`  let invS = length(basisX);`)
+    code.push(`  let s    = 1.0 / invS;`)
+    code.push(`  currentScale = currentScale * s;`)
+    code.push(`  currentP     = opTransform(currentP, transform);`)
+  } else {
+    // generic case: just call the warp
+    const callArgs = ['currentP'].concat(args.map(([n]) => n)).join(', ')
+    code.push(`  currentP = ${fnName}(${callArgs});`)
+  }
+
+  // 4) done
+  code.push(`  break;`)
+  code.push(`}`)
+
+  return code.join('\n')
+}
+
+/**
+ * Emit WGSL code lines to read `name` of given `type` from uniforms.program[pc..]
+ * and advance pc accordingly.
+ */
+function readUniform(type, name) {
+  const { count, ctor } = getTypeInfo(type)
+  const lines = []
+  if (count === 1) {
+    lines.push(`  let ${name}: f32 = uniforms.program[pc];`)
+  } else {
+    // build the component list
+    const comps = Array.from({ length: count }, (_, i) => `uniforms.program[pc + ${i}u]`).join(', ')
+    lines.push(`  let ${name}: ${ctor} = ${ctor}(${comps});`)
+  }
+  lines.push(`  pc = pc + ${count}u;`)
+  return lines.join('\n')
 }

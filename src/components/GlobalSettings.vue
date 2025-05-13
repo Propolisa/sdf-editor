@@ -15,8 +15,7 @@
                         <q-field label="Epsilon"><template v-slot:control><q-slider
                                     v-model="global_settings.display.raymarch.epsilon" :min=".000001" :max="2"
                                     :step=".000001" label color="light-green" /></template></q-field>
-                        <q-slider v-model="global_settings.display.resolution_multiplier" :min=".5" :max="4" :step=".2"
-                            label color="light-green" />
+                        <q-slider v-model="HW_SCALING" :min=".1" :max="1" :step=".01" label color="light-green" />
                     </q-card-section>
                 </q-card>
             </q-expansion-item>
@@ -27,7 +26,10 @@
 <script>
 export default {
     data() {
-        return { show_global_settings: true }
+        return { show_global_settings: true, HW_SCALING:    1 / this.global_settings.display.resolution_multiplier }
+    },
+    watch: {
+        HW_SCALING(newVal) { this.global_settings.display.resolution_multiplier = 1 / newVal}
     },
     methods: {
         toggleGlobalSettings() {

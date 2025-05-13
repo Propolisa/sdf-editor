@@ -1788,4 +1788,16 @@ Object.keys(SD_LIB).forEach((category) => {
   })
 })
 
-export default SD_LIB
+class _SD_LIB {
+  constructor() {
+    Object.assign(this, SD_LIB)
+    Object.entries(SD_LIB).forEach(([cat_name, cat]) => {
+      Object.values(cat).forEach((fn_def) => {
+        ;(fn_def.category = cat_name), (this[fn_def.fn_name] = fn_def)
+      })
+    })
+  }
+}
+
+let lib = new _SD_LIB()
+export default lib

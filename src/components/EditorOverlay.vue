@@ -1,6 +1,7 @@
 <template>
-    <q-splitter before-class="sdfe-do-not-overflow" after-class="se_panel_root" class="absolute-full" v-model="splitWidth">
-        <template #before >
+    <q-splitter before-class="sdfe-do-not-overflow" after-class="se_panel_root" class="absolute-full"
+        v-model="splitWidth">
+        <template #before>
             <GlobalSettings></GlobalSettings>
             <slot></slot>
         </template>
@@ -50,7 +51,15 @@
 
                             </q-tab-panel>
 
-                            <q-tab-panel name="modifiers">
+                            <q-tab-panel v-if="selected" name="modifiers">
+                                <!-- Add-child dropdown, only for group nodes -->
+                                <q-btn-dropdown text-color="white" dense dropdown-icon="none" size="sm" flat unelevated
+                                    style="pointer-events:auto;">
+                                    <template v-slot:label>
+                                        <q-icon name="mdi-plus"></q-icon>
+                                    </template>
+                                    <LibraryPicker @set-model="addModifier" />
+                                </q-btn-dropdown>
                                 <template v-if="selected?.modifiers?.length">
                                     <div v-for="(m, i) in selected.modifiers" :key="i"
                                         class="modifier-item q-mb-md q-pa-sm bg-grey-8 rounded">
@@ -64,7 +73,8 @@
                                                 <div class="text-caption text-white q-mr-sm">
                                                     {{ key }}
                                                 </div>
-                                                <vector-or-scalar-editor v-model="m.args[key]" />
+                                                <vector-or-scalar-editor v-model="m.args[key]"
+                                                    :wgslType="m.def.args[key]" />
                                             </div>
                                         </div>
                                     </div>
@@ -86,14 +96,15 @@
 
 import SD_LIB from "src/lib/sd-lib"
 import TreeNode from "./TreeNode.vue"
+import LibraryPicker from "./LibraryPicker.vue"
 import VectorOrScalarEditor from "./VectorOrScalarEditor.vue"
 import GlobalSettings from "./GlobalSettings.vue"
 export default {
     name: "EditorOverlay",
-    components: { TreeNode, VectorOrScalarEditor, GlobalSettings },
+    components: { TreeNode, VectorOrScalarEditor, GlobalSettings, LibraryPicker },
     watch: {
         "state.selected_shape_id": {
-            handler(newVal, oldVal){
+            handler(newVal, oldVal) {
                 this.selected = this.sdf_scene.findNodeById(newVal)
             }
         }
@@ -138,6 +149,9 @@ export default {
         }
     },
     methods: {
+        addModifier(val) {
+            this.selected.addModifier(val.value)
+        },
         // find node by id
         findById(id) {
             const recurse = n => {
@@ -206,7 +220,7 @@ export default {
             this.state.selected_shape_id = node.id
         },
 
-        
+
 
 
 
