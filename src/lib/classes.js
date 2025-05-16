@@ -131,8 +131,8 @@
 // }
 
 import { StandardMaterial, MeshBuilder, Matrix, Quaternion, Vector3 } from '@babylonjs/core'
-import SD_LIB from './sd-lib'
-import { FISH } from "./scenes"
+import SD_LIB, { emitFunction } from './sd-lib'
+import { BLOBBY, DEFAULT, FISH } from './scenes'
 
 // 1) Flatten SD_LIB into a quick lookup: opName → { category, def }
 const OP_DEFS = {}
@@ -262,7 +262,6 @@ const SCENE_DEF_JSON = {
   ],
 }
 
-
 /*
  * Defines classes for procedural SDF scene construction:
  *  - SDFModifier: wraps a modifier operation
@@ -304,8 +303,207 @@ export class SDFModifier {
     )
   }
 }
+// sd-lib.js must export default `lib` and named `CONTEXTUAL_ARGUMENTS` as you described:
+import lib, { CONTEXTUAL_ARGUMENTS } from './sd-lib.js'
+
+export function compileScene(scene, lang = 'wgsl', include_referenced_fn_defs) {
+  // 1) Printer definitions
+  const functions_referenced_in_scene = new Set([])
+  const printers = {
+    wgsl: {
+      // header: fn sdScene(p: vec3<f32>) -> f32 {
+      funcStart: () => `fn sdScene(p: vec3<f32>) -> f32 {`,
+      // varDecl('vec3', 'p0', 'p') → "  var p0: vec3<f32> = p;"
+      varDecl: (type, name, expr) => {
+        const t =
+          type === 'vec3'
+            ? `var ${name}: vec3<f32> = ${expr};`
+            : `var ${name}: f32       = ${expr};`
+        return `  ${t}`
+      },
+      assign: (name, expr) => `  ${name} = ${expr};`,
+      ret: (name) => `  return ${name};`,
+      // fmt a JS number or array into WGSL literal
+      fmtVal: (v) => {
+        if (typeof v === 'number') return v.toFixed(6)
+        if (Array.isArray(v) && v.length === 3)
+          return `vec3<f32>(${v.map((x) => x.toFixed(6)).join(', ')})`
+        if (Array.isArray(v) && v.length === 16)
+          return `mat4x4<f32>(${v.map((x) => x.toFixed(6)).join(', ')})`
+        throw new Error(`WGSL fmtVal can't handle ${JSON.stringify(v)}`)
+      },
+      call: (op, args) => `${op}(${args.join(', ')})`,
+    },
+
+    glsl: {
+      funcStart: () => `float sdScene(vec3 p) {`,
+      varDecl: (type, name, expr) => {
+        const t = type === 'vec3' ? `vec3 ${name} = ${expr};` : `float ${name} = ${expr};`
+        return `  ${t}`
+      },
+      assign: (name, expr) => `  ${name} = ${expr};`,
+      ret: (name) => `  return ${name};`,
+      fmtVal: (v) => {
+        if (typeof v === 'number') return v.toFixed(6)
+        if (Array.isArray(v) && v.length === 3)
+          return `vec3(${v.map((x) => x.toFixed(6)).join(', ')})`
+        if (Array.isArray(v) && v.length === 16)
+          return `mat4(${v.map((x) => x.toFixed(6)).join(', ')})`
+        throw new Error(`GLSL fmtVal can't handle ${JSON.stringify(v)}`)
+      },
+      call: (op, args) => `${op}(${args.join(', ')})`,
+    },
+  }
+
+  const P = printers[lang] || printers.wgsl
+  const BOOL_OPS = new Set([
+    'opUnion',
+    'opSubtract',
+    'opIntersect',
+    'opChamferUnion',
+    'opChamferSubtract',
+    'opChamferIntersect',
+    'opSmoothUnion',
+    'opSmoothSubtract',
+    'opSmoothIntersect',
+  ])
+
+  let idCounter = 0
+  const lines = []
+
+  function unique(prefix) {
+    return `${prefix}_${idCounter++}`
+  }
+
+  function collectUsageDetails(node) {
+    functions_referenced_in_scene.add(node.op)
+    if (node.children) {
+      node.children.forEach((child) => collectUsageDetails(child))
+    }
+    if (node.modifiers) {
+      node.modifiers.forEach((modifier) => functions_referenced_in_scene.add(modifier.op))
+    }
+  }
+
+  /**
+   * Recursively generate code for a node.
+   * @param {object} node
+   * @param {number} scale      accumulated uniform scale
+   * @param {string} inVar      name of the vec3 input
+   * @returns {string}          name of the float var with this node's distance
+   */
+  function walk(node, scale, inVar) {
+    functions_referenced_in_scene.add(node.op)
+    const pVar = unique('p')
+    const dVar = unique('d')
+
+    // start from the incoming point
+    lines.push(P.varDecl('vec3', pVar, inVar))
+
+    // apply modifiers in order
+    for (let mod of node.modifiers || []) {
+      functions_referenced_in_scene.add(mod.op)
+      const fnDef = lib[mod.op]
+      if (!fnDef) throw new Error(`Unknown modifier ${mod.op}`)
+      const argNames = Object.keys(fnDef.args)
+      const ctxArgs = CONTEXTUAL_ARGUMENTS[fnDef.category] || new Set()
+
+      // build call args in fn-defined order, skipping contextual ones
+      const callArgs = [pVar]
+      for (let name of argNames) {
+        if (ctxArgs.has(name)) continue
+        const val = mod.args[name]
+        if (val === undefined) throw new Error(`Missing arg ${name} for ${mod.op}`)
+        callArgs.push(P.fmtVal(val))
+      }
+      lines.push(P.assign(pVar, P.call(mod.op, callArgs)))
+
+      // only these two modify scale
+      if (mod.op === 'opScale') {
+        scale *= mod.args.s
+      } else if (mod.op === 'opTransform') {
+        // transform matrix is the inverse: its [0] = 1/s
+        const inv = mod.args.transform[0]
+        scale *= 1 / inv
+      }
+    }
+
+    // primitive distance‐function?
+    if (node.op in SD_LIB.DISTANCE_FUNCTIONS) {
+      const fnDef = lib[node.op]
+      const argNames = Object.keys(fnDef.args)
+      const ctxArgs = CONTEXTUAL_ARGUMENTS[fnDef.category] || new Set()
+      const callArgs = [pVar]
+
+      for (let name of argNames) {
+        if (ctxArgs.has(name)) continue
+        callArgs.push(P.fmtVal(node.args[name]))
+      }
+
+      lines.push(P.varDecl('float', dVar, P.call(node.op, callArgs)))
+
+      if (scale !== 1.0) {
+        lines.push(P.assign(dVar, `${dVar} * ${scale.toFixed(6)}`))
+      }
+      return dVar
+    }
+
+    // boolean, blend or displacement
+    const fnCat = lib[node.op].category
+    if (BOOL_OPS.has(node.op) || fnCat === 'DISPLACEMENT_OPS') {
+      // generate child distances
+      const childDs = (node.children || []).map((ch) => walk(ch, scale, pVar))
+
+      // no children → zero
+      if (childDs.length === 0) {
+        lines.push(P.varDecl('float', dVar, '0.0'))
+        return dVar
+      }
+      // single-child passthrough
+      if (childDs.length === 1) {
+        lines.push(P.varDecl('float', dVar, childDs[0]))
+        return dVar
+      }
+
+      // collect extra (non-contextual) args
+      const fnDef = lib[node.op]
+      const argNames = Object.keys(fnDef.args)
+      const ctxArgs = CONTEXTUAL_ARGUMENTS[fnDef.category] || new Set()
+      const extra = argNames.filter((n) => !ctxArgs.has(n)).map((n) => P.fmtVal(node.args[n]))
+
+      // fold pairwise
+      let expr = P.call(node.op, [childDs[0], childDs[1], ...extra])
+      lines.push(P.varDecl('float', dVar, expr))
+
+      for (let i = 2; i < childDs.length; i++) {
+        expr = P.call(node.op, [dVar, childDs[i], ...extra])
+        lines.push(P.assign(dVar, expr))
+      }
+
+      return dVar
+    }
+
+    throw new Error(`Unsupported op: ${node.op}`)
+  }
+
+  collectUsageDetails(scene)
+  let fn_defs = [...functions_referenced_in_scene]
+    .map((op_name) => emitFunction(SD_LIB[op_name], lang))
+    .join('\n\n')
+  // emit the function
+  lines.push(fn_defs + '\n\n\n')
+
+  lines.push(P.funcStart())
+  const rootD = walk(scene, 1.0, 'p')
+  lines.push(P.ret(rootD))
+  lines.push(`}`)
+
+  return lines.join('\n')
+}
 
 // 3) small map for WGSL vs GLSL
+
+// WGSL/GLSL templates
 const SHADERS = {
   wgsl: {
     header: (body) => `fn sdScene(p: vec3<f32>) -> f32 {\n  return ${body};\n}`,
@@ -317,6 +515,81 @@ const SHADERS = {
     vec: (n) => `vec${n}`,
     mat4: `mat4`,
   },
+}
+
+// Utility: sanitize names for WGSL/GLSL identifiers
+function sanitizeName(name) {
+  return name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^([^a-zA-Z_])/, '_$1')
+}
+
+// Two‑pass generator integrated into SDFNode
+
+// Pass 1: mark nodes needing hoist
+function markHoists(node) {
+  node._hoist = node.modifiers.length > 0 && node.children.length > 1
+  node.children.forEach(markHoists)
+}
+
+// Fresh counter
+let _varId = 0
+function fresh(prefix) {
+  return `${prefix}_${_varId++}`
+}
+
+// Pass 2: emit nested WGSL/GLSL
+function emitNode(node, pIn, sIn, lang) {
+  const lines = []
+  const nameHint = node.name ? sanitizeName(node.name) : null
+  let pCur = pIn,
+    sCur = sIn
+
+  // Hoist if flagged
+  if (node._hoist) {
+    const pVar = nameHint ? `p_${nameHint}` : fresh('p')
+    const sVar = nameHint ? `s_${nameHint}` : fresh('s')
+    // chain modifiers
+    node.modifiers.forEach((mod) => {
+      lines.push(`let ${pVar} = ${mod.op}(${pCur}, ${formatArgs(mod.args)});`)
+      pCur = pVar
+      if (mod.op === 'opScale') {
+        lines.push(`let ${sVar} = ${sCur} * ${mod.args.s};`)
+        sCur = sVar
+      }
+      // opTransform scale extraction omitted for brevity
+    })
+  }
+
+  // Leaf vs boolean
+  if (!node.children.length) {
+    const result = nameHint ? `d_${nameHint}` : fresh('d')
+    // inline single-use mods
+    if (!node._hoist && node.modifiers.length) {
+      let expr = `${node.op}(${pCur}, ${formatArgs(node.args)})`
+      node.modifiers
+        .slice()
+        .reverse()
+        .forEach((mod) => {
+          expr = `${mod.op}(${expr}, ${formatArgs(mod.args)})`
+        })
+      lines.push(`let ${result} = ${expr} * ${sCur};`)
+    } else {
+      lines.push(`let ${result} = ${node.op}(${pCur}, ${formatArgs(node.args)}) * ${sCur};`)
+    }
+    return { lines, resultVar: result }
+  }
+
+  // Composite/boolean
+  const childVars = []
+  node.children.forEach((child) => {
+    const { lines: cl, resultVar } = emitNode(child, pCur, sCur, lang)
+    lines.push(...cl)
+    childVars.push(resultVar)
+  })
+
+  const result = nameHint ? `d_${nameHint}` : fresh('d')
+  const extra = node.args.k != null ? `, ${node.args.k}` : ''
+  lines.push(`let ${result} = ${node.op}(${childVars.join(', ')}${extra});`)
+  return { lines, resultVar: result }
 }
 
 // --- SDFNode: each node knows its scene & parent, allocates/releases IDs automatically ---
@@ -442,19 +715,44 @@ export class SDFNode {
 
   // public entry for GLSL
   toGLSL() {
-    return this._toShader('glsl')
+    return this._generateShader('glsl')
   }
 
   // reuse for WGSL as well:
   toWGSL() {
-    return this._toShader('wgsl')
+    return this._generateShader('wgsl')
   }
 
-  _toShader(lang) {
-    const s = SHADERS[lang]
-    if (!s) throw new Error(`Unknown shader target "${lang}"`)
-    const body = this._emit('p', s)
-    return s.header(body)
+  // inside your SDFNode class…
+
+  /**
+   * Emit a flat, inlined WGSL (or GLSL) sdScene function that
+   * exactly matches the bytecode semantics.
+   */
+  _generateShader(lang) {
+    return compileScene(this, lang)
+  }
+
+  /** Turn a name into a safe WGSL/GLSL identifier. */
+  _safeName(name) {
+    return name.replace(/\W+/g, '_')
+  }
+
+  /** Create a fresh temp name and store definition. */
+  _safeTemp(base, expr) {
+    return `${base}_${Math.random().toString(36).slice(2, 5)} = ${expr}`
+  }
+
+  /** Format a JS value or array into WGSL/GLSL literal. */
+  _formatVal(v, type, vec = (n) => `vec${n}<f32>`, mat4 = 'mat4x4<f32>') {
+    if (Array.isArray(v)) {
+      const ctor = type.startsWith('vec') ? vec(v.length) : mat4
+      return `${ctor}(${v.map((x) => x.toFixed(8)).join(', ')})`
+    }
+    // scalar
+    let s = v.toFixed(8)
+    if (!s.includes('.')) s += '.0'
+    return s
   }
 
   // inside class SDFNode { …
@@ -931,7 +1229,7 @@ export class SDFBabylonAdapter {
 
 // --- Helper to generate both scenes together ---
 export function generateSceneAndBabylonAdapter(babylonScene) {
-  const sdf = new SDFScene(FISH) // your SDFScene
+  const sdf = new SDFScene(BLOBBY) // your SDFScene
   const adapter = new SDFBabylonAdapter(sdf, babylonScene)
   // whenever you add/remove nodes: call adapter.sync()
   return { sdf, adapter }

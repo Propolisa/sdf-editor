@@ -14,6 +14,7 @@ import {
   PointerEventTypes,
 } from '@babylonjs/core'
 import { HW_SCALING } from './defaults'
+import { toRef, watch } from 'vue'
 
 export function setupEditorView(scene, camera, global_settings, state, sdf_scene) {
   const engine = scene.getEngine()
@@ -249,16 +250,17 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
           sdf_scene.duplicateNode(state.selected_shape_id, true)
           transformState = TransformState()
           selectedMesh = scene.getNodeByName('node_' + state.selected_shape_id)
-          handleKey('g', key)
+          handleKey('g', evt.sourceEvent)
         }
       }
     }),
   )
 
-  function handleKey(key) {
+  function handleKey(key, event) {
     var lowerKey = key.toLowerCase()
-    if (['r', 's', 'g'].includes(lowerKey)) {
+    if (['r', 's', 'g'].includes(lowerKey) && !event.ctrlKey && !event.altKey && !event.shiftKey) {
       // Start a transform operation and clear any previous numeric input.
+      if (!selectedMesh) return
       transformState.mode = lowerKey === 'r' ? 'rotate' : lowerKey === 's' ? 'scale' : 'translate'
       transformState.startMatrix = selectedMesh.getWorldMatrix().clone()
       transformState.inputStr = ''
@@ -324,19 +326,29 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
     new ExecuteCodeAction(ActionManager.OnKeyDownTrigger, function (evt) {
       var key = evt.sourceEvent.key
 
-      handleKey(key)
+      handleKey(key, evt.sourceEvent)
     }),
   )
 
-  scene.onPointerObservable.add((pointerInfo) => {
-    switch (pointerInfo.type) {
-      case PointerEventTypes.POINTERDOWN:
-        if (state.selected_shape_id_buffer) {
-          state.selected_shape_id = state.selected_shape_id_buffer
-          gizmoManager.attachToMesh(scene.getMeshByName('node_' + state.selected_shape_id))
-        }
+  watch(
+    toRef(state, 'selected_shape_id'),
+    (newValue, oldValue) => {
+      gizmoManager.attachToMesh(scene.getMeshByName('node_' + state.selected_shape_id))
+    },
+    { immediate: true },
+  )
+  const canvasEl = engine.getRenderingCanvas()
+  canvasEl.tabIndex = 0
 
-        break
+  scene.onPointerObservable.add((pointerInfo) => {
+    if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
+      if (!transformState.mode) {
+        state.selected_shape_id = state.selected_shape_id_buffer
+      }
+      console.log('Transform state cleared due to pointer click')
+      if (transformState.mode) {
+        transformState = new TransformState()
+      }
     }
   })
 
@@ -481,15 +493,6 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
           updateTransform()
         }
       }
-    }
-  }
-
-  // --- New: Handle pointer down to cancel transform operation ---
-  scene.onPointerDown = function (evt) {
-    // Only consider left-button clicks.
-    if (evt.button === 0 && transformState.mode) {
-      console.log('Transform state cleared due to pointer click')
-      transformState = new TransformState()
     }
   }
 }

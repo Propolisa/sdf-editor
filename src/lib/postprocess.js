@@ -8,10 +8,12 @@ import {
   StorageBuffer,
   ActionManager,
   Constants,
+  WebGPUTintWASM,
 } from '@babylonjs/core'
 import { MAX_BYTECODE_LENGTH } from './defaults'
 import { generateWGSL } from './sd-scene-shader-representation'
 import { watch, toRef } from 'vue'
+import { createShapePicker } from './raymarch_picking_compute_shader'
 // TERMS:
 // SDFSceneInstance
 // SDFSceneJSON
@@ -29,18 +31,20 @@ export function setupRaymarchingPp(
   const engine = scene.getEngine()
   const shader_output = generateWGSL(sdSceneRepresentation)
   window.CODE = shader_output
+
   ShaderStore.ShadersStoreWGSL['raymarchFragmentShader'] = `
         uniform iResolution : vec2<f32>;
         var SceneTexture: texture_2d<f32>;
         var SceneTextureSampler: sampler;
     
     
-        var<storage,read_write> picked_shape : array<i32>;
+        var<storage,read_write> hovered_shape : array<i32>;
         var<storage,read_write> raymarch_depth_out_buffer : array<f32>;
-        uniform current_picked_shape_ro_index: u32;
+        var<storage,read_write> raymarch_shape_out_buffer : array<u32>;
         uniform program: array<f32, ${MAX_BYTECODE_LENGTH}>;
         uniform programLength: u32;
         uniform camTransformInv: mat4x4<f32>;
+        uniform camWorld: mat4x4<f32>;
         uniform camPosition: vec3<f32>;
         uniform bound_near: vec3<f32>;
         uniform bound_far: vec3<f32>;
@@ -122,202 +126,306 @@ export function setupRaymarchingPp(
         // ensure we never go below your base epsilon
         return max(uniforms.eps, pixelSize);
     }
-    
-    // Use the distance-only evaluation for marching.
-    fn sdf(p: vec3<f32>) -> f32 {
-        return sdRpn(p);
-    }
-    
-    // Updated RayHit now includes the surface normal and AO.
-    struct RayHit {
-        hit:      bool,
-        distance: f32,
-        position: vec3<f32>,
-        normal:   vec3<f32>,
-        ao:       f32,
-        material: vec4<f32>,
-        shapeID:  u32
-    };
-    
-    // Basic raymarching function that uses distance-only sdf. Only if a hit is detected
-    // do we compute the full material+normal+AO via sdRpnMaterial.
-    fn raymarch(origin: vec3<f32>, dir: vec3<f32>) -> RayHit {
-        var totalDistance = 0.0;
-        let MAX_DISTANCE = 30.0;
-        let MAX_STEPS = 200;
-        var pos: vec3<f32> = origin;
-        var hit: bool = false;
-        
-        // March along the ray using the fast distance-only SDF.
-        for (var i: i32 = 0; i < MAX_STEPS; i = i + 1) {
-            pos = origin + totalDistance * dir;
-            let d = sdf(pos);
-            if (d < select(uniforms.eps, get_epsilon(totalDistance), uniforms.adaptiveEpsilon == 1)) {
-                hit = true;
-                break;
-            }
-            totalDistance = totalDistance + d;
-            if (totalDistance > MAX_DISTANCE) {
-                break;
-            }
+    // Distance-only SDF
+fn sdf(p: vec3<f32>) -> f32 {
+    return sdRpn(p);
+}
+
+// Updated RayHit now includes the surface normal, AO, AND closest-point info
+struct RayHit {
+    hit:            bool,
+    distance:       f32,
+    position:       vec3<f32>,
+    normal:         vec3<f32>,
+    ao:             f32,
+    material:       vec4<f32>,
+    shapeID:        u32,
+    // Added fields for the closest point along the ray
+    closestPosition: vec3<f32>,
+    closestDistance: f32,
+}
+
+// Raymarching function now also tracks the closest point (min |SDF|) along the ray
+fn raymarch(origin: vec3<f32>, dir: vec3<f32>) -> RayHit {
+    var totalDistance: f32 = 0.0;
+    let MAX_DISTANCE = 30.0;
+    let MAX_STEPS = 200;
+    var pos = origin;
+    var hit: bool = false;
+
+    // For tracking the closest point
+    var minAbsDist: f32 = MAX_DISTANCE;
+    var closestPos:    vec3<f32> = origin;
+    var closestDist:   f32 = MAX_DISTANCE;
+
+    // March loop
+    for (var i: i32 = 0; i < MAX_STEPS; i = i + 1) {
+        pos = origin + totalDistance * dir;
+        let d = sdf(pos);
+        let absd = abs(d);
+        // Update closest-point info
+        if (absd < minAbsDist) {
+            minAbsDist = absd;
+            closestPos = pos;
+            closestDist = totalDistance;
         }
-        
-        // Defaults
-        var mat:     vec4<f32> = vec4<f32>(1.0, 1.0, 1.0, 1.0);
-        var N:       vec3<f32> = vec3<f32>(0.0, 1.0, 0.0);
-        var occ:     f32       = 1.0;
-        var shapeID: u32       = 0u;
-        
-        if (hit) {
-            // Final full evaluation: gives us color, shapeID, normal, ao
-            let res = sdRpnMaterial(pos);
-            mat     = res.color;
-            shapeID = res.shapeID;
-            N       = res.normal;
-            occ     = res.ao;
+        // Hit test (adaptive or fixed epsilon)
+        if (d < select(uniforms.eps, get_epsilon(totalDistance), uniforms.adaptiveEpsilon == 1u)) {
+            hit = true;
+            break;
         }
-        
-        return RayHit(hit, totalDistance, pos, N, occ, mat, shapeID);
-    }
-    
-    //-- Helper: boost saturation & brightness --
-    fn bumpColor(color: vec3<f32>, satFactor: f32, brightFactor: f32) -> vec3<f32> {
-        let gray = dot(color, vec3<f32>(0.299, 0.587, 0.114));
-        let saturated = mix(vec3<f32>(gray), color, satFactor);
-        return saturated * brightFactor;
-    }
-    
-    @fragment
-    fn main(input : FragmentInputs) -> FragmentOutputs {
-        // background
-        var sceneColor: vec4<f32> = textureSample(SceneTexture, SceneTextureSampler, input.vUV);
-    
-        let rayOrigin    = uniforms.camPosition;
-        let rayDirection = normalize(getRayFromScreenSpaceNonNorm(input.vUV));
-    
-        // raymarch
-        let hitResult = raymarch(rayOrigin, rayDirection);
-        let fragPx  = vec2<i32>(
-            i32(input.vUV.x * uniforms.iResolution.x),
-            i32(input.vUV.y * uniforms.iResolution.y)
-        );
-        let mousePx = vec2<i32>(
-            i32(uniforms.mouseUV.x * uniforms.iResolution.x),
-            i32(uniforms.mouseUV.y * uniforms.iResolution.y)
-        );
-        var col: vec4<f32>;
-        if (hitResult.hit) {
-            // pick highlighting
-            if (fragPx.x == mousePx.x && fragPx.y == mousePx.y) {
-                picked_shape[
-                    select(0u, 1u, uniforms.current_picked_shape_ro_index == 0u)
-                ] = i32(hitResult.shapeID);
-            }
-            // lighting
-            let diffuse: f32 = clamp(dot(hitResult.normal, uniforms.lightDir), 0.3, 1.0);
-            let env:     vec3<f32> = environmentLight(rayDirection);
-            let lighting: vec3<f32> = hitResult.material.rgb * diffuse + 0.2 * env;
-    
-            // apply precomputed AO
-            col = vec4<f32>(lighting * hitResult.ao, hitResult.material.a);
-    
-            // picked-shape tint
-            if (u32(picked_shape[uniforms.current_picked_shape_ro_index]) == hitResult.shapeID) {
-                let boosted = bumpColor(col.rgb, 1.8, 1.5);
-                col = vec4<f32>(boosted, col.a);
-            }
-        } else {
-            col = sceneColor;
+        totalDistance = totalDistance + d;
+        if (totalDistance > MAX_DISTANCE) {
+            break;
         }
-    
-        // write depth
-        let pixelCoords: vec2<i32> = vec2<i32>(
-            i32(input.vUV.x * uniforms.iResolution.x),
-            i32(input.vUV.y * uniforms.iResolution.y)
-        );
-        let index: i32 = pixelCoords.y * i32(uniforms.iResolution.x) + pixelCoords.x;
-        raymarch_depth_out_buffer[index] = hitResult.distance;
-    
-        var o: FragmentOutputs;
-        o.color = col;
-        return o;
     }
+
+    // Defaults
+    var mat:     vec4<f32>    = vec4<f32>(1.0, 1.0, 1.0, 1.0);
+    var N:       vec3<f32>    = vec3<f32>(0.0, 1.0, 0.0);
+    var occ:     f32          = 1.0;
+    var shapeID: u32          = 0u;
+    // Choose which point we return: the hit point or closest point
+    let finalPos  = select(closestPos, pos, hit);
+    let finalDist = select(closestDist, totalDistance, hit);
+
+    if (hit) {
+        // Full material + normal + AO eval at the true surface
+        let res = sdRpnMaterial(pos);
+        mat     = res.color;
+        shapeID = res.shapeID;
+        N       = res.normal;
+        occ     = res.ao;
+    }
+
+    return RayHit(
+        hit,
+        finalDist,
+        finalPos,
+        N,
+        occ,
+        mat,
+        shapeID,
+        closestPos,
+        closestDist
+    );
+}
+
+
+@fragment
+fn main(input: FragmentInputs) -> FragmentOutputs {
+    // 1) Background
+    let uv         = input.vUV;
+    let sceneColor = textureSample(SceneTexture, SceneTextureSampler, uv);
+
+    // 2) Primary ray
+    let rayOrigin = uniforms.camPosition;
+    let rayDir    = normalize(getRayFromScreenSpaceNonNorm(uv));
+
+    // 3) Raymarch
+    let hitRes = raymarch(rayOrigin, rayDir);
+
+    // 4) Pixel coords (for depth & picking)
+    let fragPx = vec2<i32>(
+        i32(uv.x * uniforms.iResolution.x),
+        i32(uv.y * uniforms.iResolution.y)
+    );
+
+    // 5) Shade or show background
+    var col: vec4<f32>;
+    if (hitRes.hit) {
+        // 5b) Lighting & AO
+        let diff     = clamp(dot(hitRes.normal, uniforms.lightDir), 0.3, 1.0);
+        let env      = environmentLight(rayDir);
+        let lighting = hitRes.material.rgb * diff + 0.2 * env;
+        col = vec4<f32>(lighting * hitRes.ao, hitRes.material.a);
+    }
+    else {
+        col = sceneColor;
+    }
+
+    // 7) Write depth
+    let idx = fragPx.y * i32(uniforms.iResolution.x) + fragPx.x;
+    raymarch_depth_out_buffer[idx] = hitRes.distance;
+    raymarch_shape_out_buffer[idx] = hitRes.shapeID;
+
+    // 8) Output
+    var out: FragmentOutputs;
+    out.color = col;
+    return out;
+}
 
     
     `
 
   ShaderStore.ShadersStoreWGSL['compositeFragmentShader'] = `
-        uniform iResolution : vec2<f32>;
-        var<storage,read_write> raymarch_depth_out_buffer : array<f32>;
-        var DepthMapTexture: texture_2d<f32>;
-        var DepthMapTextureSampler: sampler;
-        var textureSampler: texture_2d<f32>;
-        var textureSamplerSampler: sampler;
-        
-        var sceneSampler: texture_2d<f32>;
-        var sceneSamplerSampler: sampler;
+    uniform iResolution        : vec2<f32>;
+    uniform borderThicknessPx : f32;     
+    uniform selectedShapeId   : u32;     
+    var<storage,read_write> hovered_shape : array<i32>;
+    var<storage,read_write> raymarch_depth_out_buffer : array<f32>;
+    var<storage,read_write> raymarch_shape_out_buffer : array<u32>;
+    var DepthMapTexture        : texture_2d<f32>;
+    var DepthMapTextureSampler : sampler;
+    var textureSampler         : texture_2d<f32>;
+    var textureSamplerSampler  : sampler;
+    var sceneSampler           : texture_2d<f32>;
+    var sceneSamplerSampler    : sampler;
+
+    const MAX_RM_DIST     : f32 = 20.0;
+    const DEPTH_THRESHOLD : f32 = 1.;
+
     fn sampleDepth(vUV: vec2<f32>) -> f32 {
-        // Convert normalized UV to pixel coordinates.
-        let pixelCoords: vec2<i32> = vec2<i32>(
+        let px  = vec2<i32>(
             i32(vUV.x * uniforms.iResolution.x),
             i32(vUV.y * uniforms.iResolution.y)
         );
-        // Compute the 1D index: index = y * screenWidth + x.
-        let index: i32 = pixelCoords.y * i32(uniforms.iResolution.x) + pixelCoords.x;
-        return raymarch_depth_out_buffer[index];
+        let idx = px.y * i32(uniforms.iResolution.x) + px.x;
+        return raymarch_depth_out_buffer[idx];
     }
-    
+
+    fn sampleShapeID(vUV: vec2<f32>) -> u32 {
+        let px  = vec2<i32>(
+            i32(vUV.x * uniforms.iResolution.x),
+            i32(vUV.y * uniforms.iResolution.y)
+        );
+        let idx = px.y * i32(uniforms.iResolution.x) + px.x;
+        return raymarch_shape_out_buffer[idx];
+    }
+
+    // Helper: boost saturation & brightness
+    fn bumpColor(color: vec3<f32>, satFactor: f32, brightFactor: f32) -> vec3<f32> {
+        let gray = dot(color, vec3<f32>(0.299, 0.587, 0.114));
+        let saturated = mix(vec3<f32>(gray), color, satFactor);
+        return saturated * brightFactor;
+    }
+
+
     @fragment
     fn main(input: FragmentInputs) -> FragmentOutputs {
-        // Sample the "scene" depth from the depth texture.
-        let sceneDepth: f32 = textureSample(DepthMapTexture, DepthMapTextureSampler, input.vUV).r;
-        // Sample the raymarched depth stored in the storage buffer.
-        let rayDepth: f32 = sampleDepth(input.vUV);
-    
-        // Get the scene color and the raymarched color.
-        let sceneCol: vec4<f32> = textureSample(sceneSampler, sceneSamplerSampler, input.vUV);
-        let rayCol: vec4<f32> = textureSample(textureSampler, textureSamplerSampler, input.vUV);
-    
+        let uv = input.vUV;
+
+        // 1) Read depths & colors
+        let sceneDepth = textureSample(DepthMapTexture, DepthMapTextureSampler, uv).r;
+        let rayDepth   = sampleDepth(uv);
+        let sceneCol   = textureSample(sceneSampler, sceneSamplerSampler, uv);
+        let rayCol     = textureSample(textureSampler, textureSamplerSampler, uv);
+
+        // 2) Depth‐blend as before
         var outColor: vec4<f32>;
-        let threshold: f32 = 5.;
-    
-        // Check if the difference between the two depths is within the threshold.
-        if (abs(rayDepth - sceneDepth) < threshold) {
-            // Compute an interpolation factor that moves from 0 to 1 as the depths become more similar.
-            // When the depths are identical, t is 1.
-            let t: f32 = 1.0 - (abs(rayDepth - sceneDepth) / threshold);
-            // Use the closer pass as the dominant color.
-            if (rayDepth < sceneDepth) {
-                // Raymarch color is closer, so blend toward it.
-                outColor = mix(sceneCol, rayCol, t);
-            } else {
-                // Scene color is closer, so blend toward it.
-                outColor = mix(rayCol, sceneCol, t);
-            }
-        } else {
-            // Outside the threshold, choose the "winner": the pass with the lower (closer) depth value.
-            if (rayDepth < sceneDepth) {
+        if (rayDepth < sceneDepth) {
                 outColor = rayCol;
             } else {
                 outColor = sceneCol;
             }
+
+        // 3) Shape‐ID border test *only* for selected shape
+        let centerID   = sampleShapeID(uv);
+        let hoveredID = u32(hovered_shape[0]);
+        let isSelected = centerID == uniforms.selectedShapeId && centerID != 0u;
+        var borderF: f32;        
+        if (centerID != 0u){
+
+         let sampleDirs = array<vec2<f32>, 8>(
+                vec2<f32>( 1.0,  0.0),
+                vec2<f32>( 0.70710678,  0.70710678),
+                vec2<f32>( 0.0,  1.0),
+                vec2<f32>(-0.70710678,  0.70710678),
+                vec2<f32>(-1.0,  0.0),
+                vec2<f32>(-0.70710678, -0.70710678),
+                vec2<f32>( 0.0, -1.0),
+                vec2<f32>( 0.70710678, -0.70710678)
+            );
+
+            // 2) radius in pixels
+            let r = uniforms.borderThicknessPx;
+
+            // 3) count how many of those 8 samples differ
+            var diffCount: i32 = 0;
+            for (var i: i32 = 0; i < 8; i = i + 1) {
+                // offset in UV space
+                let offsUV = uv + sampleDirs[i] * (r / uniforms.iResolution);
+                let sid    = sampleShapeID(offsUV);
+                if (isSelected && sid != centerID) {
+                    diffCount = diffCount + 1;
+                }
+            }
+
+            // 4) blend factor = fraction of “outside” samples
+            borderF = f32(diffCount) / 4.0;
         }
-    
-        return FragmentOutputs(outColor);
+      
+
+        // 5) apply bump + red blend just on selected shape
+        if (isSelected) {
+            let lit = bumpColor(outColor.rgb, 1.8, 1.5);
+            
+                outColor    = mix(outColor, vec4<f32>(1.0, 0.0, 0.0, 1.0), borderF);
+
+        }
+
+        if (hoveredID == centerID){
+          let boosted = bumpColor(outColor.rgb, 1.8, 1.5);
+          outColor = vec4<f32>(boosted, outColor.a);
+        }
+            
+
+        // 5) output
+        var out: FragmentOutputs;
+        out.color = outColor;
+        return out;
     }
-    
-    `
+`
 
   const rayBox = MeshBuilder.CreateBox('rayBox', { size: 4 })
   rayBox.position.y = 2
   rayBox.visibility = 0
   rayBox.isVisible = false
 
-  var depth_renderer, depth_texture
+  // create or re-create depth renderer, texture, and both buffers
+
+  let hovered_shape_buffer = new StorageBuffer(
+    engine,
+    Uint32Array.BYTES_PER_ELEMENT,
+    Constants.BUFFER_CREATIONFLAG_WRITE | Constants.BUFFER_CREATIONFLAG_READ,
+  )
+  // make the picker
+  const shapePicker = createShapePicker(engine)
+
+  var depth_renderer, depth_texture, raymarch_depth_out_buffer, raymarch_shape_out_buffer
   const handleResize = () => {
+    // (1) rebuild depth pass
     scene.disableDepthRenderer()
     depth_renderer = scene.enableDepthRenderer(camera, undefined, undefined, undefined, true)
     depth_texture = depth_renderer.getDepthMap()
+
+    // (2) dispose old buffers if they exist
+    if (raymarch_depth_out_buffer) {
+      raymarch_depth_out_buffer.dispose()
+    }
+    if (raymarch_shape_out_buffer) {
+      raymarch_shape_out_buffer.dispose()
+    }
+
+    // (3) create new buffers at current size
+    const w = engine.getRenderWidth() * global_settings.display.resolution_multiplier
+    const h = engine.getRenderHeight() * global_settings.display.resolution_multiplier
+    // compute pixel count and pad to a multiple of 4 elements
+    const pixelCount = w * h
+    const paddedCount = Math.ceil(pixelCount / 4) * 4
+
+    // allocate padded buffers
+    raymarch_depth_out_buffer = new StorageBuffer(
+      engine,
+      Float32Array.BYTES_PER_ELEMENT * paddedCount,
+    )
+    raymarch_shape_out_buffer = new StorageBuffer(
+      engine,
+      Uint32Array.BYTES_PER_ELEMENT * paddedCount,
+    )
+
+    // (4) re-bind into your picker so it always uses the latest shape buffer
+    shapePicker.setBuffers(raymarch_shape_out_buffer, hovered_shape_buffer)
   }
 
   scene.getEngine().onResizeObservable.add(() => {
@@ -341,7 +449,6 @@ export function setupRaymarchingPp(
       'adaptiveEpsilon',
       'lightDir',
       'mouseUV',
-      'current_picked_shape_ro_index',
       'program',
       'programLength',
     ],
@@ -349,38 +456,19 @@ export function setupRaymarchingPp(
     engine: scene.getEngine(),
   })
 
-  let raymarch_depth_out_buffer = new StorageBuffer(
-    scene.getEngine(),
-    Float32Array.BYTES_PER_ELEMENT *
-      scene.getEngine().getRenderWidth() *
-      scene.getEngine().getRenderHeight(),
-  )
-
-  let picked_shape_buffer = new StorageBuffer(
-    engine,
-    Uint32Array.BYTES_PER_ELEMENT * 4,
-    Constants.BUFFER_CREATIONFLAG_WRITE | Constants.BUFFER_CREATIONFLAG_READ,
-  )
-  let read_write_toggle = 0
   scene.onBeforeRenderObservable.add((_) => {
-    picked_shape_buffer.read().then((data) => {
-      data = new Uint32Array(data.buffer)
-      let candidate = data[read_write_toggle ? 1 : 0]
+    hovered_shape_buffer.read().then((data) => {
+      data = new Int32Array(data.buffer)
+      console.log(data[0])
+      let candidate = data[0]
       if (candidate != state.selected_shape_id) {
         state.selected_shape_id_buffer = candidate
       }
     })
   })
-  raymarchPass.onBeforeRenderObservable.add((effect) => {
-    picked_shape_buffer.update(new Uint32Array([0]), !read_write_toggle ? 4 : 0)
 
-    effect.setInt('current_picked_shape_ro_index', read_write_toggle)
-
-    read_write_toggle = read_write_toggle ? 0 : 1
-  })
   let last_sum = 0
   raymarchPass.onApplyObservable.addOnce((effect) => {
-    let mouseUV = new Vector2(999999, 999999)
     let shader_data = generateWGSL(sdSceneRepresentation)
     let new_sum = shader_data.program.reduce((prev, curr) => prev + curr, 0)
     if (last_sum != new_sum) {
@@ -403,6 +491,7 @@ export function setupRaymarchingPp(
         1.0 - scene.pointerY / (canvasHeight * global_settings.display.resolution_multiplier)
       const mouseUV = new Vector2(x, y)
       effect.setVector2('mouseUV', mouseUV)
+      shapePicker.dispatch(mouseUV)
     })
     watch(
       toRef(global_settings.display.raymarch, 'adaptive_epsilon'),
@@ -432,7 +521,8 @@ export function setupRaymarchingPp(
     last_sum = new_sum
     effect.setInt('programLength', shader_data.programLength)
     engine.setStorageBuffer('raymarch_depth_out_buffer', raymarch_depth_out_buffer)
-    engine.setStorageBuffer('picked_shape', picked_shape_buffer)
+    engine.setStorageBuffer('raymarch_shape_out_buffer', raymarch_shape_out_buffer)
+    engine.setStorageBuffer('hovered_shape', hovered_shape_buffer)
 
     effect._bindTexture('SceneTexture', raymarchPass.inputTexture.texture)
 
@@ -454,7 +544,6 @@ export function setupRaymarchingPp(
     effect.setMatrix('camWorld', camera?.getWorldMatrix())
     effect.setMatrix('camTransform', camera?.getTransformationMatrix())
     effect.setVector3('camPosition', camera?.position)
-    effect.setInt('current_picked_shape_ro_index', read_write_toggle)
   })
 
   camera.attachPostProcess(raymarchPass)
@@ -480,16 +569,19 @@ export function setupRaymarchingPp(
     ShaderLanguage.WGSL,
   )
 
-  compositePass.onApply = function (effect) {
-    engine.setStorageBuffer('raymarch_depth_out_buffer', raymarch_depth_out_buffer)
+  compositePass.onApplyObservable.add((effect) => {
     effect.setVector2(
       'iResolution',
       new Vector2(engine.getRenderWidth(false), engine.getRenderHeight(false)),
     )
+    effect.setFloat('borderThicknessPx', 4 * (1 / global_settings.display.resolution_multiplier)) // e.g. 3 pixels
+    effect.setInt('selectedShapeId', state.selected_shape_id) // e.g. 3 pixels
+    engine.setStorageBuffer('hovered_shape', hovered_shape_buffer)
+    engine.setStorageBuffer('raymarch_depth_out_buffer', raymarch_depth_out_buffer)
+    engine.setStorageBuffer('raymarch_shape_out_buffer', raymarch_shape_out_buffer)
     effect._bindTexture('DepthMapTexture', depth_texture.getInternalTexture())
     effect.setTextureFromPostProcess('sceneSampler', scene_copy_pass)
-    // effect.setTextureFromPostProcess("RaymarchTexture", raymarchPass);
-  }
+  })
 
   return raymarchPass
 }

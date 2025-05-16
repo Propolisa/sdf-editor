@@ -74,7 +74,7 @@
                                                     {{ key }}
                                                 </div>
                                                 <vector-or-scalar-editor v-model="m.args[key]"
-                                                    :wgslType="m.def.args[key]" />
+                                                    :wgslType="m?.def?.args[key]" />
                                             </div>
                                         </div>
                                     </div>

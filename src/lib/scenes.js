@@ -1079,3 +1079,106 @@ export const BLOBBY = {
     },
   ],
 }
+
+export const DEFAULT = {
+  op: 'opUnion',
+
+  children: [
+    {
+      op: 'sdSphere',
+      args: { r: 0.3 },
+      // Material: red
+      material: { r: 5.0, g: 1.0, b: 0.0, a: 1.0 },
+      // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
+      modifiers: [{ op: 'opTranslate', args: { t: [2.3, 3, -15.0] } }],
+    },
+    {
+      op: 'opSmoothUnion',
+      args: { k: 0.07 },
+      children: [
+        // Trunk: smooth opUnion of two overlapping spheres.
+        {
+          op: 'opSmoothUnion',
+          args: { k: 0.3 },
+          children: [
+            {
+              op: 'sdRoundBox',
+              args: { b: [3, 0.2, 3], r: 0.5 },
+              // Material: red
+              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+
+              modifiers: [
+                { op: 'opTranslate', args: { t: [0.0, -0.5, 0.0] } },
+                { op: 'opRotateY', args: { a: 0 } },
+                { op: 'opRotateX', args: { a: 0 } },
+                { op: 'opRotateZ', args: { a: 0 } },
+
+                { op: 'opScale', args: { s: 1 } },
+              ],
+            },
+            {
+              op: 'sdSphere',
+              args: { r: 0.3 },
+              // Material: red
+              material: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+              // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
+              modifiers: [
+                { op: 'opTranslate', args: { t: [0.0, 0.3, 0.0] } },
+                { op: 'opScale', args: { s: 1 } },
+              ],
+            },
+            {
+              op: 'sdSphere',
+              args: { r: 0.3 },
+              // Material: red
+              material: { r: 1.0, g: 0.0, b: 1.0, a: 1.0 },
+              // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
+              modifiers: [
+                { op: 'opTranslate', args: { t: [-2.0, 0.1, 1.5] } },
+                { op: 'opScale', args: { s: 1 } },
+              ],
+            },
+            {
+              op: 'sdSphere',
+              args: { r: 0.25 },
+              material: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+              modifiers: [{ op: 'opTranslate', args: { t: [0.0, 0.7, 0.0] } }],
+            },
+          ],
+        },
+        // Canopy: smooth opUnion of several spheres.
+        {
+          op: 'opSmoothUnion',
+          args: { k: 0.4 },
+          children: [
+            {
+              op: 'sdSphere',
+              args: { r: 0.4 },
+              // Material: green
+              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+              modifiers: [{ op: 'opTranslate', args: { t: [0.0, 1.2, 0.0] } }],
+            },
+            {
+              op: 'sdSphere',
+              args: { r: 0.35 },
+              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+              modifiers: [{ op: 'opTranslate', args: { t: [0.4, 1.3, 0.0] } }],
+            },
+            {
+              op: 'sdSphere',
+              args: { r: 0.25 },
+              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+              modifiers: [{ op: 'opTranslate', args: { t: [-0.4, 1.3, 0.0] } }],
+            },
+            {
+              op: 'sdSphere',
+              args: { r: 0.3 },
+              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+              modifiers: [{ op: 'opTranslate', args: { t: [0.0, 1.5, 0.4] } }],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+}

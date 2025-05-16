@@ -45,7 +45,7 @@ const global_settings = reactive({
   display: {
     mode: 'raymarch',
     raymarch: { epsilon: 0.001, adaptive_epsilon: true },
-    resolution_multiplier: 4
+    resolution_multiplier: 3
   }
 })
 
@@ -53,6 +53,14 @@ const state = reactive({
   selected_shape_id: 0,
   selected_shape_id_buffer: 0
 })
+watch(
+  toRef(state, "selected_shape_id"),
+  (newValue, oldValue) => {
+    canvas.value.focus()
+  }
+
+)
+
 
 const adapter = ref(null)
 const sdf_scene = ref(null)
@@ -64,6 +72,8 @@ const scene = ref(null)
 function onResize() {
   engine.value?.resize()
 }
+
+
 
 // initialize or re-create Babylon engine & scene
 async function resetBabylon() {
@@ -77,6 +87,7 @@ async function resetBabylon() {
   await engine.value.initAsync()
   scene.value = new Scene(engine.value)
 }
+
 
 // lifecycle hooks
 onMounted(async () => {
@@ -156,6 +167,7 @@ onBeforeUnmount(() => {
   scene.value?.dispose()
   engine.value?.dispose()
 })
+
 
 // provide reactive values to descendants
 provide('global_settings', computed(() => global_settings))
