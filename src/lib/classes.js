@@ -130,9 +130,121 @@
 //     }
 // }
 
-import { StandardMaterial, MeshBuilder, Matrix, Quaternion, Vector3 } from '@babylonjs/core'
-import SD_LIB, { emitFunction } from './sd-lib'
-import { BLOBBY, DEFAULT, FISH } from './scenes'
+// EXAMPLE SCENE, SERIALIZED JSON REPRESENTATION
+//  const SCENE_DEF_JSON = {
+//   op: 'opUnion',
+
+//   children: [
+//     {
+//       op: 'sdSphere',
+//       args: { r: 0.3 },
+//       // Material: red
+//       material: { r: 5.0, g: 1.0, b: 0.0, a: 1.0 },
+//       // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
+//       modifiers: [{ op: 'opTranslate', args: { t: [2.3, 3, -15.0] } }],
+//     },
+//     {
+//       op: 'opSmoothUnion',
+//       args: { k: 0.07 },
+//       children: [
+//         // Trunk: smooth opUnion of two overlapping spheres.
+//         {
+//           op: 'opSmoothUnion',
+//           args: { k: 0.3 },
+//           children: [
+//             {
+//               op: 'sdRoundBox',
+//               args: { b: [3, 0.2, 3], r: 0.5 },
+//               // Material: red
+//               material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+
+//               modifiers: [
+//                 // no artifact when scaled down
+//                 // { op: 'opTranslate', args: { t: [0.0, -0.5, 0.0] } },
+//                 // { op: 'opRotateY', args: { a: 0 } },
+//                 // { op: 'opRotateX', args: { a: 0 } },
+//                 // { op: 'opRotateZ', args: { a: 0 } },
+
+//                 // { op: 'opScale', args: { s: 0.3 } },
+//                 {
+//                   // this has artifact when scaled down
+//                   op: 'opTransform',
+//                   args: {
+//                     transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0.5, 0, 1],
+//                   },
+//                 },
+//               ],
+//             },
+//             {
+//               op: 'sdSphere',
+//               args: { r: 0.3 },
+//               // Material: red
+//               material: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+//               // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
+//               modifiers: [
+//                 { op: 'opTranslate', args: { t: [0.0, 0.3, 0.0] } },
+//                 { op: 'opScale', args: { s: 1 } },
+//               ],
+//             },
+//             {
+//               op: 'sdSphere',
+//               args: { r: 0.3 },
+//               // Material: red
+//               material: { r: 1.0, g: 0.0, b: 1.0, a: 1.0 },
+//               // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
+//               modifiers: [
+//                 { op: 'opTranslate', args: { t: [-2.0, 0.1, 1.5] } },
+//                 { op: 'opScale', args: { s: 1 } },
+//               ],
+//             },
+//             {
+//               op: 'sdSphere',
+//               args: { r: 0.25 },
+//               material: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+//               modifiers: [{ op: 'opTranslate', args: { t: [0.0, 0.7, 0.0] } }],
+//             },
+//           ],
+//         },
+//         // Canopy: smooth opUnion of several spheres.
+//         {
+//           op: 'opSmoothUnion',
+//           args: { k: 0.4 },
+//           children: [
+//             {
+//               op: 'sdSphere',
+//               args: { r: 0.4 },
+//               // Material: green
+//               material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+//               modifiers: [{ op: 'opTranslate', args: { t: [0.0, 1.2, 0.0] } }],
+//             },
+//             {
+//               op: 'sdSphere',
+//               args: { r: 0.35 },
+//               material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+//               modifiers: [{ op: 'opTranslate', args: { t: [0.4, 1.3, 0.0] } }],
+//             },
+//             {
+//               op: 'sdSphere',
+//               args: { r: 0.25 },
+//               material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+//               modifiers: [{ op: 'opTranslate', args: { t: [-0.4, 1.3, 0.0] } }],
+//             },
+//             {
+//               op: 'sdSphere',
+//               args: { r: 0.3 },
+//               material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
+//               modifiers: [{ op: 'opTranslate', args: { t: [0.0, 1.5, 0.4] } }],
+//             },
+//           ],
+//         },
+//       ],
+//     },
+//   ],
+// }
+
+import SD_LIB from './sd-lib'
+import { compileScene } from './scene-compilation'
+import { Observable } from "@babylonjs/core"
 
 // 1) Flatten SD_LIB into a quick lookup: opName → { category, def }
 const OP_DEFS = {}
@@ -151,133 +263,21 @@ const CONTEXTUAL = {
   PRIMITIVE_OPS: new Set(['p', 'd']),
 }
 
-const SCENE_DEF_JSON = {
-  op: 'opUnion',
-
-  children: [
-    {
-      op: 'sdSphere',
-      args: { r: 0.3 },
-      // Material: red
-      material: { r: 5.0, g: 1.0, b: 0.0, a: 1.0 },
-      // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
-      modifiers: [{ op: 'opTranslate', args: { t: [2.3, 3, -15.0] } }],
-    },
-    {
-      op: 'opSmoothUnion',
-      args: { k: 0.07 },
-      children: [
-        // Trunk: smooth opUnion of two overlapping spheres.
-        {
-          op: 'opSmoothUnion',
-          args: { k: 0.3 },
-          children: [
-            {
-              op: 'sdRoundBox',
-              args: { b: [3, 0.2, 3], r: 0.5 },
-              // Material: red
-              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
-
-              modifiers: [
-                // no artifact when scaled down
-                // { op: 'opTranslate', args: { t: [0.0, -0.5, 0.0] } },
-                // { op: 'opRotateY', args: { a: 0 } },
-                // { op: 'opRotateX', args: { a: 0 } },
-                // { op: 'opRotateZ', args: { a: 0 } },
-
-                // { op: 'opScale', args: { s: 0.3 } },
-                {
-                  // this has artifact when scaled down
-                  op: 'opTransform',
-                  args: {
-                    transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0.5, 0, 1],
-                  },
-                },
-              ],
-            },
-            {
-              op: 'sdSphere',
-              args: { r: 0.3 },
-              // Material: red
-              material: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
-              // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
-              modifiers: [
-                { op: 'opTranslate', args: { t: [0.0, 0.3, 0.0] } },
-                { op: 'opScale', args: { s: 1 } },
-              ],
-            },
-            {
-              op: 'sdSphere',
-              args: { r: 0.3 },
-              // Material: red
-              material: { r: 1.0, g: 0.0, b: 1.0, a: 1.0 },
-              // (Optionally, you could provide an "id" manually; otherwise it is auto-assigned.)
-              modifiers: [
-                { op: 'opTranslate', args: { t: [-2.0, 0.1, 1.5] } },
-                { op: 'opScale', args: { s: 1 } },
-              ],
-            },
-            {
-              op: 'sdSphere',
-              args: { r: 0.25 },
-              material: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
-              modifiers: [{ op: 'opTranslate', args: { t: [0.0, 0.7, 0.0] } }],
-            },
-          ],
-        },
-        // Canopy: smooth opUnion of several spheres.
-        {
-          op: 'opSmoothUnion',
-          args: { k: 0.4 },
-          children: [
-            {
-              op: 'sdSphere',
-              args: { r: 0.4 },
-              // Material: green
-              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
-              modifiers: [{ op: 'opTranslate', args: { t: [0.0, 1.2, 0.0] } }],
-            },
-            {
-              op: 'sdSphere',
-              args: { r: 0.35 },
-              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
-              modifiers: [{ op: 'opTranslate', args: { t: [0.4, 1.3, 0.0] } }],
-            },
-            {
-              op: 'sdSphere',
-              args: { r: 0.25 },
-              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
-              modifiers: [{ op: 'opTranslate', args: { t: [-0.4, 1.3, 0.0] } }],
-            },
-            {
-              op: 'sdSphere',
-              args: { r: 0.3 },
-              material: { r: 0.0, g: 1.0, b: 0.0, a: 1.0 },
-              modifiers: [{ op: 'opTranslate', args: { t: [0.0, 1.5, 0.4] } }],
-            },
-          ],
-        },
-      ],
-    },
-  ],
-}
-
-/*
- * Defines classes for procedural SDF scene construction:
- *  - SDFModifier: wraps a modifier operation
- *  - SDFNode: wraps an SDF primitive or CSG node, with args, material, modifiers, children, and optional name/id
- *  - SDFScene: hosts the root SDFNode
- *  - generateScene: returns a fully-instantiated SDFScene
- */
-
-// --- SDFModifier stays exactly the same ---
-export class SDFModifier {
-  /**
-   * @param {{op: string, args: object}} config
-   */
-  constructor({ op, args = {} }) {
+class SDFLibraryFunctionRepr {
+  constructor({ op, args = {}, name = null, id = null }, scene, parent = null) {
+    // assign or allocate a unique integer id
+    // in the superclass constructor
+    if (id != null) {
+      this.id = Number(id)
+      scene.registerId(this.id, this)
+    } else {
+      this.id = scene.allocateId(this)
+    }
     this.op = op
-    this.onChange = null
+    this.name = name
+    this.scene = scene
+    this.parent = parent
+    this.onChange = () => { this.scene?.onNeedsRedrawObservable.notifyObservers(true)}
     this.def = SD_LIB?.[op]
     const isEqual = (a, b) => {
       if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
@@ -302,327 +302,42 @@ export class SDFModifier {
       },
     )
   }
+
+  patch(path, value) {
+    // returns oldValue, serialized if it has a serialize() method
+  }
 }
-// sd-lib.js must export default `lib` and named `CONTEXTUAL_ARGUMENTS` as you described:
-import lib, { CONTEXTUAL_ARGUMENTS } from './sd-lib.js'
 
-export function compileScene(scene, lang = 'wgsl', include_referenced_fn_defs) {
-  // 1) Printer definitions
-  const functions_referenced_in_scene = new Set([])
-  const printers = {
-    wgsl: {
-      // header: fn sdScene(p: vec3<f32>) -> f32 {
-      funcStart: () => `fn sdScene(p: vec3<f32>) -> f32 {`,
-      // varDecl('vec3', 'p0', 'p') → "  var p0: vec3<f32> = p;"
-      varDecl: (type, name, expr) => {
-        const t =
-          type === 'vec3'
-            ? `var ${name}: vec3<f32> = ${expr};`
-            : `var ${name}: f32       = ${expr};`
-        return `  ${t}`
-      },
-      assign: (name, expr) => `  ${name} = ${expr};`,
-      ret: (name) => `  return ${name};`,
-      // fmt a JS number or array into WGSL literal
-      fmtVal: (v) => {
-        if (typeof v === 'number') return v.toFixed(6)
-        if (Array.isArray(v) && v.length === 3)
-          return `vec3<f32>(${v.map((x) => x.toFixed(6)).join(', ')})`
-        if (Array.isArray(v) && v.length === 16)
-          return `mat4x4<f32>(${v.map((x) => x.toFixed(6)).join(', ')})`
-        throw new Error(`WGSL fmtVal can't handle ${JSON.stringify(v)}`)
-      },
-      call: (op, args) => `${op}(${args.join(', ')})`,
-    },
+/*
+ * Defines classes for procedural SDF scene construction:
+ *  - SDFModifier: wraps a modifier operation
+ *  - SDFNode: wraps an SDF primitive or CSG node, with args, material, modifiers, children, and optional name/id
+ *  - SDFScene: hosts the root SDFNode
+ *  - generateScene: returns a fully-instantiated SDFScene
+ */
 
-    glsl: {
-      funcStart: () => `float sdScene(vec3 p) {`,
-      varDecl: (type, name, expr) => {
-        const t = type === 'vec3' ? `vec3 ${name} = ${expr};` : `float ${name} = ${expr};`
-        return `  ${t}`
-      },
-      assign: (name, expr) => `  ${name} = ${expr};`,
-      ret: (name) => `  return ${name};`,
-      fmtVal: (v) => {
-        if (typeof v === 'number') return v.toFixed(6)
-        if (Array.isArray(v) && v.length === 3)
-          return `vec3(${v.map((x) => x.toFixed(6)).join(', ')})`
-        if (Array.isArray(v) && v.length === 16)
-          return `mat4(${v.map((x) => x.toFixed(6)).join(', ')})`
-        throw new Error(`GLSL fmtVal can't handle ${JSON.stringify(v)}`)
-      },
-      call: (op, args) => `${op}(${args.join(', ')})`,
-    },
-  }
-
-  const P = printers[lang] || printers.wgsl
-  const BOOL_OPS = new Set([
-    'opUnion',
-    'opSubtract',
-    'opIntersect',
-    'opChamferUnion',
-    'opChamferSubtract',
-    'opChamferIntersect',
-    'opSmoothUnion',
-    'opSmoothSubtract',
-    'opSmoothIntersect',
-  ])
-
-  let idCounter = 0
-  const lines = []
-
-  function unique(prefix) {
-    return `${prefix}_${idCounter++}`
-  }
-
-  function collectUsageDetails(node) {
-    functions_referenced_in_scene.add(node.op)
-    if (node.children) {
-      node.children.forEach((child) => collectUsageDetails(child))
-    }
-    if (node.modifiers) {
-      node.modifiers.forEach((modifier) => functions_referenced_in_scene.add(modifier.op))
-    }
-  }
-
+// --- SDFModifier stays exactly the same ---
+export class SDFModifier extends SDFLibraryFunctionRepr {
   /**
-   * Recursively generate code for a node.
-   * @param {object} node
-   * @param {number} scale      accumulated uniform scale
-   * @param {string} inVar      name of the vec3 input
-   * @returns {string}          name of the float var with this node's distance
+   * @param {{op: string, args: object}} config
    */
-  function walk(node, scale, inVar) {
-    functions_referenced_in_scene.add(node.op)
-    const pVar = unique('p')
-    const dVar = unique('d')
-
-    // start from the incoming point
-    lines.push(P.varDecl('vec3', pVar, inVar))
-
-    // apply modifiers in order
-    for (let mod of node.modifiers || []) {
-      functions_referenced_in_scene.add(mod.op)
-      const fnDef = lib[mod.op]
-      if (!fnDef) throw new Error(`Unknown modifier ${mod.op}`)
-      const argNames = Object.keys(fnDef.args)
-      const ctxArgs = CONTEXTUAL_ARGUMENTS[fnDef.category] || new Set()
-
-      // build call args in fn-defined order, skipping contextual ones
-      const callArgs = [pVar]
-      for (let name of argNames) {
-        if (ctxArgs.has(name)) continue
-        const val = mod.args[name]
-        if (val === undefined) throw new Error(`Missing arg ${name} for ${mod.op}`)
-        callArgs.push(P.fmtVal(val))
-      }
-      lines.push(P.assign(pVar, P.call(mod.op, callArgs)))
-
-      // only these two modify scale
-      if (mod.op === 'opScale') {
-        scale *= mod.args.s
-      } else if (mod.op === 'opTransform') {
-        // transform matrix is the inverse: its [0] = 1/s
-        const inv = mod.args.transform[0]
-        scale *= 1 / inv
-      }
-    }
-
-    // primitive distance‐function?
-    if (node.op in SD_LIB.DISTANCE_FUNCTIONS) {
-      const fnDef = lib[node.op]
-      const argNames = Object.keys(fnDef.args)
-      const ctxArgs = CONTEXTUAL_ARGUMENTS[fnDef.category] || new Set()
-      const callArgs = [pVar]
-
-      for (let name of argNames) {
-        if (ctxArgs.has(name)) continue
-        callArgs.push(P.fmtVal(node.args[name]))
-      }
-
-      lines.push(P.varDecl('float', dVar, P.call(node.op, callArgs)))
-
-      if (scale !== 1.0) {
-        lines.push(P.assign(dVar, `${dVar} * ${scale.toFixed(6)}`))
-      }
-      return dVar
-    }
-
-    // boolean, blend or displacement
-    const fnCat = lib[node.op].category
-    if (BOOL_OPS.has(node.op) || fnCat === 'DISPLACEMENT_OPS') {
-      // generate child distances
-      const childDs = (node.children || []).map((ch) => walk(ch, scale, pVar))
-
-      // no children → zero
-      if (childDs.length === 0) {
-        lines.push(P.varDecl('float', dVar, '0.0'))
-        return dVar
-      }
-      // single-child passthrough
-      if (childDs.length === 1) {
-        lines.push(P.varDecl('float', dVar, childDs[0]))
-        return dVar
-      }
-
-      // collect extra (non-contextual) args
-      const fnDef = lib[node.op]
-      const argNames = Object.keys(fnDef.args)
-      const ctxArgs = CONTEXTUAL_ARGUMENTS[fnDef.category] || new Set()
-      const extra = argNames.filter((n) => !ctxArgs.has(n)).map((n) => P.fmtVal(node.args[n]))
-
-      // fold pairwise
-      let expr = P.call(node.op, [childDs[0], childDs[1], ...extra])
-      lines.push(P.varDecl('float', dVar, expr))
-
-      for (let i = 2; i < childDs.length; i++) {
-        expr = P.call(node.op, [dVar, childDs[i], ...extra])
-        lines.push(P.assign(dVar, expr))
-      }
-
-      return dVar
-    }
-
-    throw new Error(`Unsupported op: ${node.op}`)
+  constructor({ op, args = {} }, scene, parent = null) {
+    super(...arguments)
   }
-
-  collectUsageDetails(scene)
-  let fn_defs = [...functions_referenced_in_scene]
-    .map((op_name) => emitFunction(SD_LIB[op_name], lang))
-    .join('\n\n')
-  // emit the function
-  lines.push(fn_defs + '\n\n\n')
-
-  lines.push(P.funcStart())
-  const rootD = walk(scene, 1.0, 'p')
-  lines.push(P.ret(rootD))
-  lines.push(`}`)
-
-  return lines.join('\n')
-}
-
-// 3) small map for WGSL vs GLSL
-
-// WGSL/GLSL templates
-const SHADERS = {
-  wgsl: {
-    header: (body) => `fn sdScene(p: vec3<f32>) -> f32 {\n  return ${body};\n}`,
-    vec: (n) => `vec${n}f`,
-    mat4: `mat4x4<f32>`,
-  },
-  glsl: {
-    header: (body) => `float sdScene(vec3 p) {\n  return ${body};\n}`,
-    vec: (n) => `vec${n}`,
-    mat4: `mat4`,
-  },
-}
-
-// Utility: sanitize names for WGSL/GLSL identifiers
-function sanitizeName(name) {
-  return name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^([^a-zA-Z_])/, '_$1')
-}
-
-// Two‑pass generator integrated into SDFNode
-
-// Pass 1: mark nodes needing hoist
-function markHoists(node) {
-  node._hoist = node.modifiers.length > 0 && node.children.length > 1
-  node.children.forEach(markHoists)
-}
-
-// Fresh counter
-let _varId = 0
-function fresh(prefix) {
-  return `${prefix}_${_varId++}`
-}
-
-// Pass 2: emit nested WGSL/GLSL
-function emitNode(node, pIn, sIn, lang) {
-  const lines = []
-  const nameHint = node.name ? sanitizeName(node.name) : null
-  let pCur = pIn,
-    sCur = sIn
-
-  // Hoist if flagged
-  if (node._hoist) {
-    const pVar = nameHint ? `p_${nameHint}` : fresh('p')
-    const sVar = nameHint ? `s_${nameHint}` : fresh('s')
-    // chain modifiers
-    node.modifiers.forEach((mod) => {
-      lines.push(`let ${pVar} = ${mod.op}(${pCur}, ${formatArgs(mod.args)});`)
-      pCur = pVar
-      if (mod.op === 'opScale') {
-        lines.push(`let ${sVar} = ${sCur} * ${mod.args.s};`)
-        sCur = sVar
-      }
-      // opTransform scale extraction omitted for brevity
-    })
-  }
-
-  // Leaf vs boolean
-  if (!node.children.length) {
-    const result = nameHint ? `d_${nameHint}` : fresh('d')
-    // inline single-use mods
-    if (!node._hoist && node.modifiers.length) {
-      let expr = `${node.op}(${pCur}, ${formatArgs(node.args)})`
-      node.modifiers
-        .slice()
-        .reverse()
-        .forEach((mod) => {
-          expr = `${mod.op}(${expr}, ${formatArgs(mod.args)})`
-        })
-      lines.push(`let ${result} = ${expr} * ${sCur};`)
-    } else {
-      lines.push(`let ${result} = ${node.op}(${pCur}, ${formatArgs(node.args)}) * ${sCur};`)
-    }
-    return { lines, resultVar: result }
-  }
-
-  // Composite/boolean
-  const childVars = []
-  node.children.forEach((child) => {
-    const { lines: cl, resultVar } = emitNode(child, pCur, sCur, lang)
-    lines.push(...cl)
-    childVars.push(resultVar)
-  })
-
-  const result = nameHint ? `d_${nameHint}` : fresh('d')
-  const extra = node.args.k != null ? `, ${node.args.k}` : ''
-  lines.push(`let ${result} = ${node.op}(${childVars.join(', ')}${extra});`)
-  return { lines, resultVar: result }
 }
 
 // --- SDFNode: each node knows its scene & parent, allocates/releases IDs automatically ---
-export class SDFNode {
+export class SDFNode extends SDFLibraryFunctionRepr {
   /**
    * @param {object} config
    * @param {SDFScene} scene
    * @param {SDFNode|null} parent
    */
-  constructor(
-    { op, args = {}, material = {}, modifiers = [], children = [], name = null, id = null },
-    scene,
-    parent = null,
-  ) {
-    this.scene = scene
-    this.parent = parent
-
-    // assign or allocate a unique integer id
-    if (id != null) {
-      this.id = Number(id)
-      scene.registerId(this.id)
-    } else {
-      this.id = scene.allocateId()
-    }
-
-    this.op = op
-    this.args = args
+  constructor({ material = {}, modifiers = [], children = [] }, scene, parent = null) {
+    super(...arguments)
     this.material = material
-    this.name = name
-
     // wrap and store modifiers
-    this.modifiers = modifiers.map((m) => new SDFModifier(m))
-
+    this.modifiers = modifiers?.length ? modifiers.map((m) => new SDFModifier(m, scene, this)) : []
     // recursively build children, passing along scene & parent
     this.children = []
     for (const childConfig of children) {
@@ -637,16 +352,23 @@ export class SDFNode {
    * @returns        The newly created SDFModifier
    */
   addModifier(opName, args = {}) {
+    this.scene.onNeedsRedrawObservable.notifyObservers(true)
     // 1) Build a minimal config for that op (same as addNode does under the hood)
     const cfg = this.scene._makeConfigFromLib(opName)
     // 2) Override any default args with what the caller passed
     cfg.args = { ...cfg.args, ...args }
     // 3) Wrap it in an SDFModifier
-    const mod = new SDFModifier(cfg)
+    const mod = new SDFModifier(cfg, this.scene, this)
     // 4) Attach to this node and re-sync any adapters
     this.modifiers.push(mod)
     this.scene.updateAdapters()
     return mod
+  }
+
+  removeModifier(index) {
+    this.scene.onNeedsRedrawObservable.notifyObservers(true)
+    this.modifiers.splice(index, 1)
+    this.scene.updateAdapters()
   }
 
   /**
@@ -654,6 +376,7 @@ export class SDFNode {
    * @returns {SDFNode} the newly created child
    */
   addChild(config) {
+    this.scene.onNeedsRedrawObservable.notifyObservers(true)
     const child = new SDFNode(config, this.scene, this)
     this.children.push(child)
     this.scene.updateAdapters()
@@ -666,6 +389,7 @@ export class SDFNode {
    * @returns {boolean} true if removed
    */
   removeChild(toRemove) {
+    this.scene.onNeedsRedrawObservable.notifyObservers(true)
     const target =
       typeof toRemove === 'number' ? this.children.find((c) => c.id === toRemove) : toRemove
     if (!target) return false
@@ -677,8 +401,12 @@ export class SDFNode {
     }
     recurseFree(target)
 
-    // detach
-    this.children = this.children.filter((c) => c !== target)
+    // --- remove child reactively using splice ---
+    const idx = this.children.indexOf(target)
+    if (idx !== -1) {
+      this.children.splice(idx, 1)
+    }
+
     target.parent = null
     return true
   }
@@ -844,7 +572,6 @@ export class SDFNode {
   }
 }
 
-// --- SDFScene: owns ID pool & builds the whole tree ---
 export class SDFScene {
   /**
    * @param {object} sceneJson  top-level node config
@@ -853,117 +580,200 @@ export class SDFScene {
     if (!sceneJson) {
       throw new Error('SDFScene requires a valid scene JSON')
     }
-    // Adapters to notify on changes
-    this.adapters = new Set()
-    // ID‐management state
+
+    // — ID management —
     this.nextId = 1 // next fresh ID
     this.freeIds = [] // recycled IDs
-    this.usedIds = new Set()
+    this.usedIds = new Set() // all currently in-use IDs
 
-    // build the actual node tree
+    // — Separate lookup tables —
+    this.nodeMap = new Map() // id → SDFNode
+    this.modifierMap = new Map() // id → SDFModifier
+
+    // — Adapters to notify on changes —
+    this.adapters = new Set()
+
+    // Build the actual tree; root will register itself (and its subtree)
     this.root = new SDFNode(sceneJson, this, null)
+    this.onNeedsRedrawObservable = new Observable()
   }
 
+  // — Adapter API —
   registerAdapter(adapter) {
     this.adapters.add(adapter)
   }
-
   updateAdapters() {
-    ;[...this.adapters].forEach((a) => a.sync())
+    for (let a of this.adapters) a.sync()
   }
 
-  /** reserve a user-provided ID */
-  registerId(id) {
+  // — Internal helpers for ID pooling —
+  _reserveId(id, instance) {
     const n = Number(id)
     if (!Number.isInteger(n) || n < 1) {
-      throw new Error(`Invalid node ID: ${id}`)
+      throw new Error(`Invalid ID: ${id}`)
     }
     if (this.usedIds.has(n)) {
-      throw new Error(`Duplicate node ID: ${n}`)
+      throw new Error(`Duplicate ID: ${n}`)
     }
     this.usedIds.add(n)
-    if (n >= this.nextId) {
-      this.nextId = n + 1
+    if (n >= this.nextId) this.nextId = n + 1
+
+    // register in the correct map
+    if (instance instanceof SDFModifier) {
+      this.modifierMap.set(n, instance)
+    } else {
+      this.nodeMap.set(n, instance)
     }
   }
 
-  /** hand out the next available ID (recycling frees first) */
-  allocateId() {
+  _allocateId(instance) {
     let id
     if (this.freeIds.length) {
+      // reuse smallest freed ID
       this.freeIds.sort((a, b) => a - b)
       id = this.freeIds.shift()
     } else {
       id = this.nextId++
     }
     this.usedIds.add(id)
+
+    if (instance instanceof SDFModifier) {
+      this.modifierMap.set(id, instance)
+    } else {
+      this.nodeMap.set(id, instance)
+    }
     return id
   }
 
-  /** release a previously used ID back into the pool */
-  releaseId(id) {
+  _freeId(id) {
     const n = Number(id)
     if (this.usedIds.delete(n)) {
       this.freeIds.push(n)
+      this.nodeMap.delete(n)
+      this.modifierMap.delete(n)
     }
   }
 
+  // — Public ID API (called from SDFLibraryFunctionRepr) —
   /**
-   * Traverse the scene graph, invoking a callback on each node
-   * @param {function(SDFNode): void} fn
+   * Reserve a user-provided ID for a node *or* modifier.
+   * @param {number} id
+   * @param {SDFLibraryFunctionRepr} instance
    */
+  registerId(id, instance) {
+    this._reserveId(id, instance)
+  }
+
+  /**
+   * Allocate the next available ID for a node *or* modifier.
+   * @param {SDFLibraryFunctionRepr} instance
+   * @returns {number}
+   */
+  allocateId(instance) {
+    return this._allocateId(instance)
+  }
+
+  /**
+   * Release a previously used ID back into the pool.
+   * @param {number} id
+   */
+  releaseId(id) {
+    this._freeId(id)
+  }
+
+  // — Lookup by ID —
+  /**
+   * Find a **node** by its integer ID.
+   * @param {number} id
+   * @returns {SDFNode|null}
+   */
+  findNodeById(id) {
+    return this.nodeMap.get(Number(id)) || null
+  }
+
+  /**
+   * Find a **modifier** by its integer ID.
+   * @param {number} id
+   * @returns {SDFModifier|null}
+   */
+  findModifierById(id) {
+    return this.modifierMap.get(Number(id)) || null
+  }
+
+  /**
+   * Find *either* a node or modifier by its ID.
+   * @param {number} id
+   * @returns {SDFLibraryFunctionRepr|null}
+   */
+  getDescendentById(id) {
+    const n = Number(id)
+    return this.nodeMap.get(n) ?? this.modifierMap.get(n) ?? null
+  }
+
+  // — Tree traversal (nodes only!) —
   traverse(fn) {
-    const recurse = (node) => {
+    function recurse(node) {
       fn(node)
-      for (const c of node.children) recurse(c)
+      for (let c of node.children) recurse(c)
     }
     recurse(this.root)
   }
 
-  /** Find a node anywhere by its integer ID */
-  findNodeById(id) {
-    let result = null
-    this.traverse((node) => {
-      if (node.id === id) result = node
-    })
-    return result
-  }
-
+  // — Legacy API (backwards compatible) —
   /**
-   * Create a new node from SD_LIB template and attach under `parent`
-   * @param {string} opName    one of the keys in SD_LIB
-   * @param {SDFNode|number} parentOrId
-   * @returns {SDFNode} the newly created node
-   */
-
-  addNode(parentOrId, opName) {
-    const parent = typeof parentOrId === 'number' ? this.findNodeById(parentOrId) : parentOrId
-    if (!parent) {
-      throw new Error(`Parent node ${parentOrId} not found`)
-    }
-    const cfg = this._makeConfigFromLib(opName)
-    let res = parent.addChild(cfg)
-  }
-
-  /**
-   * Remove a node (and its subtree) by ID
+   * Remove a node (and subtree) by ID.
    * @param {number} nodeId
-   * @returns {boolean} true if removed
+   * @returns {boolean}
    */
   removeNodeById(nodeId) {
     const node = this.findNodeById(nodeId)
-    if (!node) {
-      throw new Error(`Node ${nodeId} not found`)
+    if (!node) throw new Error(`Node ${nodeId} not found`)
+    if (!node.parent) throw new Error(`Cannot remove the root node`)
+    const removed = node.parent.removeChild(node)
+    if (removed) {
+      // free IDs in the subtree (nodes + modifiers)
+      const recurse = (n) => {
+        for (let c of n.children) recurse(c)
+        for (let m of n.modifiers) this.releaseId(m.id)
+        this.releaseId(n.id)
+      }
+      recurse(node)
     }
-    if (!node.parent) {
-      throw new Error(`Cannot remove the root node`)
-    }
-    return node.parent.removeChild(node)
+    return removed
   }
 
-  // —— internal helpers ——
+  /**
+   * Create a new node from SD_LIB under `parentOrId`.
+   * @param {SDFNode|number} parentOrId
+   * @param {string} opName
+   * @returns {SDFNode}
+   */
+  addNode(parentOrId, opName) {
+    const parent = typeof parentOrId === 'number' ? this.findNodeById(parentOrId) : parentOrId
+    if (!parent) throw new Error(`Parent node ${parentOrId} not found`)
+    const cfg = this._makeConfigFromLib(opName)
+    return parent.addChild(cfg)
+  }
 
-  /** build a minimal config from the SD_LIB entry for `opName` */
+  /**
+   * Duplicate a node (by instance or ID).
+   * @param {SDFNode|number} nodeOrId
+   * @param {boolean} recursive
+   * @returns {SDFNode}
+   */
+  duplicateNode(nodeOrId, recursive = false) {
+    const node = typeof nodeOrId === 'number' ? this.findNodeById(nodeOrId) : nodeOrId
+    if (!node) throw new Error(`Node ${nodeOrId} not found`)
+    if (!node.parent) throw new Error(`Cannot duplicate the root node`)
+    const cfg = node.serialize(recursive)
+    return node.parent.addChild(cfg)
+  }
+
+  // ——————————————————————————————————————————————————————————————
+  // Helpers for building from SD_LIB
+  // ——————————————————————————————————————————————————————————————
+
+  /** Build a minimal config from the SD_LIB entry for `opName`. */
   _makeConfigFromLib(opName) {
     let def = null
     for (const cat of Object.values(SD_LIB)) {
@@ -978,7 +788,7 @@ export class SDFScene {
     return def.getInstance()
   }
 
-  /** 0 for scalars, zero-filled arrays for vecNf */
+  /** Default value for a given SD_LIB type (e.g. 'f32' or 'vec3f'). */
   _defaultValueForType(type) {
     if (type === 'f32') return 0
     const m = type.match(/^vec(\d+)f$/)
@@ -987,250 +797,4 @@ export class SDFScene {
     }
     return null
   }
-
-  /**
-   * Duplicate a node (by instance or ID) under its current parent.
-   * @param {SDFNode|number} nodeOrId
-   * @param {boolean} recursive  if true, copy entire subtree
-   * @returns {SDFNode}  the newly created clone
-   */
-  duplicateNode(nodeOrId, recursive = false) {
-    const node = typeof nodeOrId === 'number' ? this.findNodeById(nodeOrId) : nodeOrId
-
-    if (!node) {
-      throw new Error(`Node ${nodeOrId} not found`)
-    }
-    if (!node.parent) {
-      throw new Error(`Cannot duplicate the root node`)
-    }
-
-    // Ask the node to give us a config snapshot...
-    const cfg = node.serialize(recursive)
-
-    // ...and re-instantiate it under the same parent.
-    return node.parent.addChild(cfg)
-  }
-}
-
-// --- Adapter: keeps a Babylon.js scene in sync with an SDFScene ---
-export class SDFBabylonAdapter {
-  /**
-   * @param {SDFScene} sdfScene
-   * @param {BABYLON.Scene} babylonScene
-   */
-  constructor(sdfScene, babylonScene) {
-    this.sdfScene = sdfScene
-    this.babylonScene = babylonScene
-    this.nodeMap = new Map() // maps SDFNode → Babylon Mesh
-    this.sync()
-  }
-
-  // Traverses SDF graph to create/remove meshes as needed
-  sync() {
-    // Create meshes for new nodes
-    this.sdfScene.traverse((node) => {
-      if (!this.nodeMap.has(node)) {
-        const mesh = this._createMeshFromNode(node)
-        this.nodeMap.set(node, mesh)
-      }
-    })
-    // Dispose meshes whose nodes have been removed
-    for (let [node, mesh] of this.nodeMap) {
-      if (!this._nodeStillInScene(node)) {
-        mesh.dispose()
-        this.nodeMap.delete(node)
-      }
-    }
-  }
-
-  _nodeStillInScene(node) {
-    let found = false
-    this.sdfScene.traverse((n) => {
-      if (n === node) found = true
-    })
-    return found
-  }
-
-  _createMeshFromNode(node) {
-    // 1) Create a unit cube centered at (0,0,0)
-    const mesh = MeshBuilder.CreateBox(
-      node.id || node.name || 'bbox',
-      { size: 1 },
-      this.babylonScene,
-    )
-    mesh.material = new StandardMaterial()
-    mesh.material.alpha = 0
-    mesh.name = node.name || `node_${node.id}`
-
-    // 2) Apply any existing SDF modifiers (translate/rotate/scale)
-    this._applyModifiersToMesh(node, mesh)
-
-    // 3) SDF→Babylon: re-apply transforms on modifier change
-    for (let mod of node.modifiers) {
-      mod.onChange = () => this._applyModifiersToMesh(node, mesh)
-    }
-
-    // 4) Babylon→SDF: update node modifiers after the world matrix changes
-    mesh.registerAfterWorldMatrixUpdate(() => {
-      // 4.1) Extract current TRS from the mesh
-      const { x: px, y: py, z: pz } = mesh.position
-      const {
-        x: rx,
-        y: ry,
-        z: rz,
-      } = mesh.rotationQuaternion ? mesh.rotationQuaternion.toEulerAngles() : mesh.rotation
-      const { x: sx } = mesh.scaling // assume uniform scale
-
-      // 4.2) Determine which primitive ops are actually needed
-      const need = {
-        opTranslate: px !== 0 || py !== 0 || pz !== 0,
-        opRotateX: rx !== 0,
-        opRotateY: ry !== 0,
-        opRotateZ: rz !== 0,
-        opScale: sx !== 1,
-      }
-
-      // helper to check for existing modifier
-      const hasMod = (op) => node.modifiers.some((m) => m.op === op)
-
-      // 4.3) If *any* needed primitive is missing, fall back to opTransform
-      const missingAny = Object.entries(need).some(([op, needed]) => needed && !hasMod(op))
-
-      if (missingAny || hasMod('opTransform')) {
-        // strip out all primitive modifiers
-        node.modifiers = node.modifiers.filter(
-          (m) => !['opTranslate', 'opRotateX', 'opRotateY', 'opRotateZ', 'opScale'].includes(m.op),
-        )
-
-        // compute inverse world matrix and flatten into a 16-array
-        const inv = mesh.getWorldMatrix().clone().invert()
-        const M = inv.m // row-major 16-element array
-        const transform = [
-          M[0],
-          M[1],
-          M[2],
-          M[3],
-          M[4],
-          M[5],
-          M[6],
-          M[7],
-          M[8],
-          M[9],
-          M[10],
-          M[11],
-          M[12],
-          M[13],
-          M[14],
-          M[15],
-        ]
-
-        // upsert opTransform
-        let tf = node.modifiers.find((m) => m.op === 'opTransform')
-        if (tf) {
-          tf.args.transform = transform
-        } else {
-          node.modifiers.push({ op: 'opTransform', args: { transform } })
-        }
-      } else {
-        // all needed primitives exist → update them
-        this._writeBackModifier(node, 'opTranslate', [px, py, pz])
-        this._writeBackModifier(node, 'opRotateX', rx)
-        this._writeBackModifier(node, 'opRotateY', ry)
-        this._writeBackModifier(node, 'opRotateZ', rz)
-        this._writeBackModifier(node, 'opScale', sx)
-
-        // remove any stale opTransform so it doesn’t override
-        node.modifiers = node.modifiers.filter((m) => m.op !== 'opTransform')
-      }
-    })
-
-    return mesh
-  }
-
-  // Reads all modifiers and applies them to the mesh
-  _applyModifiersToMesh(node, mesh) {
-    const tfMod = node.modifiers.find((m) => m.op === 'opTransform')
-    if (tfMod) {
-      // tfMod.args.transform is a 16-element row-major *inverse* world-matrix
-      const invMat = Matrix.FromArray(tfMod.args.transform)
-      const worldMat = invMat.clone().invert()
-
-      // prepare mutable holders for decompose
-      const scaling = new Vector3()
-      const rotationQuaternion = new Quaternion()
-      const translation = new Vector3()
-
-      // decompose into S, R, T
-      worldMat.decompose(scaling, rotationQuaternion, translation)
-
-      // apply to mesh
-      mesh.position.copyFrom(translation)
-      mesh.scaling.copyFrom(scaling)
-      mesh.rotationQuaternion = rotationQuaternion
-
-      return
-    }
-
-    // fallback to primitive modifiers
-    const get = (op) => node.modifiers.find((m) => m.op === op)?.args
-    const t = get('opTranslate')?.t ?? [0, 0, 0]
-    const rx = get('opRotateX')?.a ?? 0
-    const ry = get('opRotateY')?.a ?? 0
-    const rz = get('opRotateZ')?.a ?? 0
-    const sArg = get('opScale')?.s
-    const s = sArg != null ? [sArg, sArg, sArg] : [1, 1, 1]
-
-    mesh.position.set(...t)
-    mesh.rotation.set(rx, ry, rz)
-    mesh.scaling.set(...s)
-  }
-
-  // Finds an existing modifier on the node and writes the new value
-  _writeBackModifier(node, op, value) {
-    // 1) find the modifier — if it doesn't exist, do nothing
-    const mod = node.modifiers.find((m) => m.op === op)
-    if (!mod) {
-      return
-    }
-
-    // 2) helper to compare numbers or arrays
-    const same = (oldVal, newVal) => {
-      if (Array.isArray(oldVal) && Array.isArray(newVal) && oldVal.length === newVal.length) {
-        return oldVal.every((v, i) => v === newVal[i])
-      }
-      return oldVal === newVal
-    }
-
-    // 3) grab the current stored value
-    let current
-    if (op === 'opTranslate') {
-      current = mod.args.t
-    } else if (op === 'opScale') {
-      // our proxy stores scale as a single number s, but compare as [s]
-      current = mod.args.s
-    } else if (op === 'opRotateY' || op === 'opRotateX' || op === 'opRotateZ') {
-      current = mod.args.a
-    }
-
-    // 4) if nothing changed, bail out
-    if (same(current, value)) {
-      return
-    }
-
-    if (op === 'opTranslate') {
-      mod.args.t = value
-    } else if (op === 'opScale') {
-      mod.args.s = value
-    } else if (op === 'opRotateY' || op === 'opRotateX' || op === 'opRotateZ') {
-      mod.args.a = value
-    }
-  }
-}
-
-// --- Helper to generate both scenes together ---
-export function generateSceneAndBabylonAdapter(babylonScene) {
-  const sdf = new SDFScene(BLOBBY) // your SDFScene
-  const adapter = new SDFBabylonAdapter(sdf, babylonScene)
-  // whenever you add/remove nodes: call adapter.sync()
-  return { sdf, adapter }
 }

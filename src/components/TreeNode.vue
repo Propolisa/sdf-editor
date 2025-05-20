@@ -41,12 +41,12 @@
             </q-chip>
 
             <!-- Add-child dropdown, only for group nodes -->
-            <q-btn-dropdown text-color="white" v-if="validateDrop(node.id)" dense dropdown-icon="none" size="sm" flat
-                unelevated style="pointer-events:auto;">
+            <q-btn-dropdown ref="dropdown" v-if="validateDrop(node.id)" text-color="white" v-model="picker_open" dense
+                dropdown-icon="none" size="sm" flat unelevated style="pointer-events:auto;">
                 <template v-slot:label>
-                    <q-icon name="mdi-plus"></q-icon>
+                    <q-icon name="mdi-plus" />
                 </template>
-                <LibraryPicker @set-model="setModel" />
+                <LibraryPicker @keydown.enter.prevent.stop @set-model="setModel" />
             </q-btn-dropdown>
             <!-- delete button on non-root nodes -->
             <q-btn text-color="white" size="xs" v-if="node.parent" dense flat round icon="mdi-content-duplicate"
@@ -91,6 +91,7 @@ export default {
         return {
             dragOver: false,
             model: null,
+            picker_open: false
         }
     },
     computed: {
@@ -148,6 +149,7 @@ export default {
                 this.sdf_scene.addNode(this.node.id, val.value)
                 this.model = null
             }
+            this.picker_open = false
         },
 
         clone(val) {

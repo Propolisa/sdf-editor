@@ -12,6 +12,9 @@ import {
   ExecuteCodeAction,
   Axis,
   PointerEventTypes,
+  Camera,
+  ArcRotateCameraMouseWheelInput,
+  ArcRotateCamera,
 } from '@babylonjs/core'
 import { HW_SCALING } from './defaults'
 import { toRef, watch } from 'vue'
@@ -48,8 +51,13 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
 
   // Whenever a mesh is attached to a gizmo, capture it as the selected mesh.
   gizmoManager.onAttachedToMeshObservable.add((m) => {
+    sdf_scene.onNeedsRedrawObservable.notifyObservers(true)
     transformState = TransformState()
-    selectedMesh = m
+    if (m?.name?.startsWith('node_')) {
+      selectedMesh = m
+    } else {
+      selectedMesh = null
+    }
   })
 
   // Helper to compute a flip factor based on the mesh-to-camera orientation relative to an axis.
@@ -223,6 +231,8 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
     if (Vector3.Distance(selectedMesh.position, newTranslation) > ε) {
       selectedMesh.position.copyFrom(newTranslation)
     }
+
+    sdf_scene.onNeedsRedrawObservable.notifyObservers(true)
   }
 
   // Handle key events.
@@ -234,6 +244,14 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
 
       if (lowerKey === 'escape') {
         transformState = TransformState()
+        return
+      }
+
+      if (lowerKey === 'delete') {
+        transformState = TransformState()
+        if (state.selected_shape_id) {
+          sdf_scene.removeNodeById(state.selected_shape_id)
+        }
         return
       }
 
@@ -250,7 +268,8 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
           sdf_scene.duplicateNode(state.selected_shape_id, true)
           transformState = TransformState()
           selectedMesh = scene.getNodeByName('node_' + state.selected_shape_id)
-          handleKey('g', evt.sourceEvent)
+
+          handleKey('g')
         }
       }
     }),
@@ -258,7 +277,12 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
 
   function handleKey(key, event) {
     var lowerKey = key.toLowerCase()
-    if (['r', 's', 'g'].includes(lowerKey) && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    if (
+      ['r', 's', 'g'].includes(lowerKey) &&
+      !event?.ctrlKey &&
+      !event?.altKey &&
+      !event?.shiftKey
+    ) {
       // Start a transform operation and clear any previous numeric input.
       if (!selectedMesh) return
       transformState.mode = lowerKey === 'r' ? 'rotate' : lowerKey === 's' ? 'scale' : 'translate'
@@ -342,6 +366,7 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
 
   scene.onPointerObservable.add((pointerInfo) => {
     if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
+      sdf_scene.onNeedsRedrawObservable.notifyObservers(true)
       if (!transformState.mode) {
         state.selected_shape_id = state.selected_shape_id_buffer
       }
@@ -349,6 +374,9 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
       if (transformState.mode) {
         transformState = new TransformState()
       }
+    }
+    if (pointerInfo.type === PointerEventTypes.POINTERUP) {
+      sdf_scene.onNeedsRedrawObservable.notifyObservers(true)
     }
   })
 
@@ -494,5 +522,281 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
         }
       }
     }
+  }
+
+  // ─── Blender-style numpad navigation ───
+  // (place this *inside* setupEditorView, just before its closing `}`)
+  const cameraState = {
+    initial: {
+      alpha: camera.alpha,
+      beta: camera.beta,
+      radius: camera.radius,
+      target: camera.getTarget().clone(),
+      mode: camera.mode,
+    },
+    backup: null,
+    lastView: null,
+  }
+
+  function backupCamera() {
+    cameraState.backup = {
+      alpha: camera.alpha,
+      beta: camera.beta,
+      radius: camera.radius,
+      target: camera.getTarget().clone(),
+      mode: camera.mode,
+    }
+  }
+
+  function restoreCamera() {
+    if (!cameraState.backup) {
+      return
+    }
+    camera.alpha = cameraState.backup.alpha
+    camera.beta = cameraState.backup.beta
+    camera.radius = cameraState.backup.radius
+    camera.setTarget(cameraState.backup.target)
+    camera.mode = cameraState.backup.mode
+  }
+
+  function toggleView(view) {
+    if (cameraState.lastView === view) {
+      restoreCamera()
+      cameraState.lastView = null
+    } else {
+      backupCamera()
+      applyView(view)
+      cameraState.lastView = view
+    }
+  }
+
+  function applyView(view) {
+    if (['front', 'back', 'left', 'right', 'top', 'bottom'].includes(view)) {
+      // camera.mode = Camera.ORTHOGRAPHIC_CAMERA
+    }
+    switch (view) {
+      case 'front':
+        camera.alpha = 0
+        camera.beta = Math.PI / 2
+        break
+      case 'back':
+        camera.alpha = Math.PI
+        camera.beta = Math.PI / 2
+        break
+      case 'right':
+        camera.alpha = Math.PI / 2
+        camera.beta = Math.PI / 2
+        break
+      case 'left':
+        camera.alpha = -Math.PI / 2
+        camera.beta = Math.PI / 2
+        break
+      case 'top':
+        camera.alpha = 0
+        camera.beta = 0
+        break
+      case 'bottom':
+        camera.alpha = 0
+        camera.beta = Math.PI
+        break
+      case 'camera':
+        camera.alpha = cameraState.initial.alpha
+        camera.beta = cameraState.initial.beta
+        camera.radius = cameraState.initial.radius
+        camera.setTarget(cameraState.initial.target)
+        camera.mode = cameraState.initial.mode
+        break
+    }
+  }
+
+  function toggleOrtho() {
+    if (camera.mode === Camera.PERSPECTIVE_CAMERA) {
+      const H = Math.tan(camera.fov / 2) * camera.radius
+      const aspect = scene.getEngine().getAspectRatio(camera, true)
+      camera.mode = Camera.ORTHOGRAPHIC_CAMERA
+      camera.orthoLeft = -H * aspect
+      camera.orthoRight = H * aspect
+      camera.orthoTop = H
+      camera.orthoBottom = -H
+    } else {
+      const H = camera.orthoTop
+      camera.radius = H / Math.tan(camera.fov / 2)
+      camera.mode = Camera.PERSPECTIVE_CAMERA
+    }
+  }
+
+  function rotateView(dir) {
+    const step = Tools.ToRadians(15)
+    switch (dir) {
+      case 'left':
+        camera.alpha -= step
+        break
+      case 'right':
+        camera.alpha += step
+        break
+      case 'up':
+        camera.beta = Math.max(0.01, camera.beta - step)
+        break
+      case 'down':
+        camera.beta = Math.min(Math.PI - 0.01, camera.beta + step)
+        break
+    }
+  }
+
+  function panView(dir) {
+    const step = camera.radius * 0.1
+    const target = camera.getTarget().clone()
+    const up = camera.upVector.clone()
+    const dirVec = camera.position.subtract(target).normalize()
+    const right = Vector3.Cross(dirVec, up).normalize()
+    switch (dir) {
+      case 'left':
+        target.addInPlace(right.scale(-step))
+        break
+      case 'right':
+        target.addInPlace(right.scale(step))
+        break
+      case 'up':
+        target.addInPlace(up.scale(step))
+        break
+      case 'down':
+        target.addInPlace(up.scale(-step))
+        break
+    }
+    camera.setTarget(target)
+  }
+
+  function zoomOnSelection() {
+    if (!selectedMesh) {
+      return
+    }
+    const info = selectedMesh.getBoundingInfo()
+    const center = info.boundingSphere.centerWorld.clone()
+    const radius = info.boundingSphere.radiusWorld
+    backupCamera()
+    camera.setTarget(center)
+    camera.radius = radius * 3
+    cameraState.lastView = null
+  }
+
+  function setCameraToViewport() {
+    cameraState.initial = {
+      alpha: camera.alpha,
+      beta: camera.beta,
+      radius: camera.radius,
+      target: camera.getTarget().clone(),
+      mode: camera.mode,
+    }
+  }
+
+  scene.actionManager.registerAction(
+    new ExecuteCodeAction(ActionManager.OnKeyUpTrigger, function (evt) {
+      const k = evt.sourceEvent.key.toLowerCase()
+      const ctrl = evt.sourceEvent.ctrlKey
+      const alt = evt.sourceEvent.altKey
+      if (transformState.mode) {
+        return
+      }
+      camera.inertialAlphaOffset = 0
+      camera.inertialBetaOffset = 0
+
+      switch (k) {
+        case '1':
+          toggleView(ctrl ? 'back' : 'front')
+          break
+        case '3':
+          toggleView(ctrl ? 'right' : 'left')
+          break
+        case '7':
+          toggleView(ctrl ? 'bottom' : 'top')
+          break
+        case '5':
+          toggleOrtho()
+          break
+        case '0':
+          if (ctrl && alt) setCameraToViewport()
+          else toggleView('camera')
+          break
+        case '2':
+          ctrl ? panView('up') : rotateView('up')
+          break
+        case '4':
+          ctrl ? panView('left') : rotateView('left')
+          break
+        case '6':
+          ctrl ? panView('right') : rotateView('right')
+          break
+        case '8':
+          ctrl ? panView('down') : rotateView('down')
+          break
+        case '/':
+          /* local-view toggle */ break
+        case '.':
+          zoomOnSelection()
+          break
+        case '+':
+          camera.radius *= 0.8
+          break
+      }
+    }),
+  )
+
+  // ─── Ortho‐mode inertia zoom on scroll ───
+  const orthoZoomScale = 0.001 // tweak for sensitivity
+  const inertiaDamping = 0.85 // between 0 (fast stop) and 1 (infinite glide)
+  let orthoScrollVel = 0 // current “momentum”
+
+  // 1) Per‐frame damping + apply zoom
+  scene.onBeforeRenderObservable.add(() => {
+    if (camera.mode === Camera.ORTHOGRAPHIC_CAMERA && Math.abs(orthoScrollVel) > 0.001) {
+      // compute uniform scale factor: positive vel -> zoom OUT
+      const factor = Math.exp(orthoScrollVel * orthoZoomScale)
+      camera.orthoLeft *= factor
+      camera.orthoRight *= factor
+      camera.orthoTop *= factor
+      camera.orthoBottom *= factor
+
+      // apply damping
+      orthoScrollVel *= inertiaDamping
+    }
+  })
+
+  // 2) Capture scroll and feed momentum (invert sign so wheel‐down -> zoom out)
+  canvasEl.addEventListener(
+    'wheel',
+    (evt) => {
+      if (camera.mode === Camera.ORTHOGRAPHIC_CAMERA) {
+        evt.preventDefault()
+        // add to velocity (positive deltaY = scroll‐down = zoom out)
+        orthoScrollVel += evt.deltaY
+      }
+    },
+    { passive: false },
+  )
+
+  // ─── Manage default wheel input on ortho/persp ───
+  function updateMouseWheelInput() {
+    const attached = camera.inputs.attached
+    // remove default wheel zoom in ortho
+    if (camera.mode === Camera.ORTHOGRAPHIC_CAMERA) {
+      if (attached.mousewheel) {
+        camera.inputs.remove(attached.mousewheel)
+      }
+    } else {
+      // re-add it when back to perspective
+      if (!attached.mousewheel) {
+        camera.inputs.add(new ArcRotateCameraMouseWheelInput())
+      }
+    }
+  }
+
+  // call once on init
+  updateMouseWheelInput()
+
+  // also call whenever we toggle ortho/persp
+  const origToggleOrtho = toggleOrtho
+  toggleOrtho = () => {
+    origToggleOrtho()
+    updateMouseWheelInput()
   }
 }

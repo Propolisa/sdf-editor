@@ -1,6 +1,6 @@
-# Babylon.js SDF Editor (babylon-sdf-editor)
+# SDF Editor
 
-An editor for signed distance fields.
+An editor for signed distance fields. Built on the amazing Babylon.js framework.
 
 ## Install the dependencies
 ```bash

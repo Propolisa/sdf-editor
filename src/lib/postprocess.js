@@ -9,11 +9,13 @@ import {
   ActionManager,
   Constants,
   WebGPUTintWASM,
+  Camera,
 } from '@babylonjs/core'
 import { MAX_BYTECODE_LENGTH } from './defaults'
 import { generateWGSL } from './sd-scene-shader-representation'
 import { watch, toRef } from 'vue'
 import { createShapePicker } from './raymarch_picking_compute_shader'
+import { createShapePickerJS } from './raymarch_picking'
 // TERMS:
 // SDFSceneInstance
 // SDFSceneJSON
@@ -41,9 +43,15 @@ export function setupRaymarchingPp(
         var<storage,read_write> hovered_shape : array<i32>;
         var<storage,read_write> raymarch_depth_out_buffer : array<f32>;
         var<storage,read_write> raymarch_shape_out_buffer : array<u32>;
+        uniform cameraOrtho       : u32;         // 0 = perspective, 1 = orthographic
+        uniform camOrthoHalfWidth : f32;         // = (orthoRight - orthoLeft) / 2
+        uniform camOrthoHalfHeight: f32;         // = (orthoTop   - orthoBottom) / 2
+
         uniform program: array<f32, ${MAX_BYTECODE_LENGTH}>;
         uniform programLength: u32;
         uniform camTransformInv: mat4x4<f32>;
+        uniform camMinZ: f32;
+        uniform camMaxZ: f32;
         uniform camWorld: mat4x4<f32>;
         uniform camPosition: vec3<f32>;
         uniform bound_near: vec3<f32>;
@@ -54,6 +62,8 @@ export function setupRaymarchingPp(
         uniform adaptiveEpsilon: u32;
         uniform camTanFov: f32;
         uniform lightDir: vec3<f32>;
+        uniform maxSteps: u32;
+        uniform maxDist: f32;
         
         varying vUV: vec2<f32>;
     
@@ -69,6 +79,37 @@ export function setupRaymarchingPp(
                 return a * (1.0 - t) + b * t;
             }
     
+      struct Ray { origin: vec3<f32>, dir: vec3<f32>, };
+       // perspective: identical to your old getRayFromScreenSpaceNonNorm +
+       // origin = camPosition
+       fn getPerspectiveRay(vUV: vec2<f32>) -> Ray {
+           let n   = vec4<f32>((vUV.x - 0.5)*2.0, (vUV.y - 0.5)*2.0, -1.0, 1.0);
+           let f   = vec4<f32>((vUV.x - 0.5)*2.0, (vUV.y - 0.5)*2.0,  1.0, 1.0);
+           var nr = uniforms.camTransformInv * n;
+           var fr = uniforms.camTransformInv * f;
+           nr /= nr.w;  fr /= fr.w;
+           let d = normalize(fr.xyz - nr.xyz);
+           return Ray(uniforms.camPosition, d);
+       }
+       // orthographic: rays are parallel (–Z in camera space), origin offset in XY
+       fn getOrthoRay(vUV: vec2<f32>) -> Ray {
+            // normalized screen offset [-1,1]
+            let ns      = (vUV - vec2<f32>(0.5)) * 2.0;
+            let right   = (uniforms.camWorld * vec4<f32>(1,0,0,0)).xyz;
+            let up      = (uniforms.camWorld * vec4<f32>(0,1,0,0)).xyz;
+            // correct forward = +Z in LH system
+            let forward = normalize((uniforms.camWorld * vec4<f32>(0,0,1,0)).xyz);
+
+            // place the ray on the near‐plane of the ortho frustum,
+            // then offset in X/Y to cover the full box
+            let o = uniforms.camPosition
+                  + forward * uniforms.camMinZ
+                  + right   * (ns.x * uniforms.camOrthoHalfWidth)
+                  + up      * (ns.y * uniforms.camOrthoHalfHeight);
+
+            return Ray(o, forward);
+        }
+
         fn getRayFromScreenSpaceNonNorm(vUV: vec2<f32>) -> vec3<f32> {
             var near: vec4<f32> = vec4((vUV.x - 0.5) * 2.0, (vUV.y - 0.5) * 2.0, -1, 1.0);
             var far: vec4<f32> = vec4((vUV.x - 0.5) * 2.0, (vUV.y - 0.5) * 2.0, 1, 1.0);
@@ -148,8 +189,8 @@ struct RayHit {
 // Raymarching function now also tracks the closest point (min |SDF|) along the ray
 fn raymarch(origin: vec3<f32>, dir: vec3<f32>) -> RayHit {
     var totalDistance: f32 = 0.0;
-    let MAX_DISTANCE = 30.0;
-    let MAX_STEPS = 200;
+    let MAX_DISTANCE = uniforms.maxDist;
+    let MAX_STEPS = uniforms.maxSteps;
     var pos = origin;
     var hit: bool = false;
 
@@ -159,7 +200,7 @@ fn raymarch(origin: vec3<f32>, dir: vec3<f32>) -> RayHit {
     var closestDist:   f32 = MAX_DISTANCE;
 
     // March loop
-    for (var i: i32 = 0; i < MAX_STEPS; i = i + 1) {
+    for (var i: u32 = 0; i < MAX_STEPS; i = i + 1) {
         pos = origin + totalDistance * dir;
         let d = sdf(pos);
         let absd = abs(d);
@@ -214,13 +255,20 @@ fn raymarch(origin: vec3<f32>, dir: vec3<f32>) -> RayHit {
 
 @fragment
 fn main(input: FragmentInputs) -> FragmentOutputs {
+
+
     // 1) Background
     let uv         = input.vUV;
     let sceneColor = textureSample(SceneTexture, SceneTextureSampler, uv);
 
     // 2) Primary ray
-    let rayOrigin = uniforms.camPosition;
-    let rayDir    = normalize(getRayFromScreenSpaceNonNorm(uv));
+
+    var ray: Ray = getPerspectiveRay(uv);
+    if (uniforms.cameraOrtho == 1u) {
+        ray = getOrthoRay(uv);
+    }
+    let rayOrigin = ray.origin;
+    let rayDir    = ray.dir;
 
     // 3) Raymarch
     let hitRes = raymarch(rayOrigin, rayDir);
@@ -303,6 +351,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 
     @fragment
     fn main(input: FragmentInputs) -> FragmentOutputs {
+    
         let uv = input.vUV;
 
         // 1) Read depths & colors
@@ -364,7 +413,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
 
         }
 
-        if (hoveredID == centerID){
+        if (hoveredID == centerID && centerID != 0u){
           let boosted = bumpColor(outColor.rgb, 1.8, 1.5);
           outColor = vec4<f32>(boosted, outColor.a);
         }
@@ -390,8 +439,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     Constants.BUFFER_CREATIONFLAG_WRITE | Constants.BUFFER_CREATIONFLAG_READ,
   )
   // make the picker
-  const shapePicker = createShapePicker(engine)
-
+  const shapePicker = createShapePickerJS(engine)
   var depth_renderer, depth_texture, raymarch_depth_out_buffer, raymarch_shape_out_buffer
   const handleResize = () => {
     // (1) rebuild depth pass
@@ -450,66 +498,71 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
       'lightDir',
       'mouseUV',
       'program',
+      'camOrthoHalfHeight',
+      'camOrthoHalfWidth',
+      'cameraOrtho',
+      'camMinZ',
+      'camMaxZ',
       'programLength',
+      'maxDist',
+      'maxSteps',
     ],
     shaderLanguage: ShaderLanguage.WGSL,
     engine: scene.getEngine(),
   })
 
-  scene.onBeforeRenderObservable.add((_) => {
-    hovered_shape_buffer.read().then((data) => {
-      data = new Int32Array(data.buffer)
-      console.log(data[0])
-      let candidate = data[0]
-      if (candidate != state.selected_shape_id) {
-        state.selected_shape_id_buffer = candidate
-      }
-    })
-  })
-
   let last_sum = 0
-  raymarchPass.onApplyObservable.addOnce((effect) => {
-    let shader_data = generateWGSL(sdSceneRepresentation)
-    let new_sum = shader_data.program.reduce((prev, curr) => prev + curr, 0)
-    if (last_sum != new_sum) {
-      effect.setFloatArray('program', new Float32Array(shader_data.program))
-    }
-    last_sum = new_sum
-    effect.setInt('programLength', shader_data.programLength)
-    // Ensure the scene has an ActionManager.
-    scene.actionManager = scene.actionManager || new ActionManager(scene)
+  raymarchPass.onEffectCreatedObservable.addOnce((effect) => {
+    effect.onCompileObservable.addOnce((effect) => {
+      let shader_data = generateWGSL(sdSceneRepresentation)
+      let new_sum = shader_data.program.reduce((prev, curr) => prev + curr, 0)
+      if (last_sum != new_sum) {
+        state.trigger_redraw = 1
+        effect.setFloatArray('program', new Float32Array(shader_data.program))
+      }
+      last_sum = new_sum
+      effect.setInt('programLength', shader_data.programLength)
+      // Ensure the scene has an ActionManager.
+      scene.actionManager = scene.actionManager || new ActionManager(scene)
 
-    // Register an action for pointer movement.
+      // Register an action for pointer movement.
 
-    scene.onBeforeRenderObservable.add((pointerInfo) => {
-      const canvasWidth = engine.getRenderWidth()
-      const canvasHeight = engine.getRenderHeight()
-      // Normalize X from 0 to 1
-      const x = scene.pointerX / (canvasWidth * global_settings.display.resolution_multiplier)
-      // Flip the Y coordinate: pointer 0 (top) -> 1, pointer canvasHeight (bottom) -> 0
-      const y =
-        1.0 - scene.pointerY / (canvasHeight * global_settings.display.resolution_multiplier)
-      const mouseUV = new Vector2(x, y)
-      effect.setVector2('mouseUV', mouseUV)
-      shapePicker.dispatch(mouseUV)
+      watch(
+        toRef(global_settings.display.raymarch, 'adaptive_epsilon'),
+        (newValue, oldValue) => {
+          effect.setInt('adaptiveEpsilon', newValue ? 1 : 0)
+        },
+        { immediate: true },
+      )
+
+      watch(
+        toRef(global_settings.display.raymarch, 'epsilon'),
+        (newValue, oldValue) => {
+          effect.setFloat('eps', newValue)
+        },
+        { immediate: true },
+      )
+
+      watch(
+        toRef(global_settings.display.raymarch, 'max_steps'),
+        (n, o) => {
+          effect.setUInt('maxSteps', n)
+        },
+        { immediate: true },
+      )
+      watch(
+        toRef(global_settings.display.raymarch, 'max_dist'),
+        (n, o) => {
+          effect.setFloat('maxDist', n)
+        },
+        { immediate: true },
+      )
+      effect.setFloat('camTanFov', Math.tan(camera.fov * 0.5))
+      effect.setVector2(
+        'resolution',
+        new Vector2(engine.getRenderWidth(), engine.getRenderHeight()),
+      )
     })
-    watch(
-      toRef(global_settings.display.raymarch, 'adaptive_epsilon'),
-      (newValue, oldValue) => {
-        effect.setInt('adaptiveEpsilon', newValue ? 1 : 0)
-      },
-      { immediate: true },
-    )
-
-    watch(
-      toRef(global_settings.display.raymarch, 'epsilon'),
-      (newValue, oldValue) => {
-        effect.setFloat('eps', newValue)
-      },
-      { immediate: true },
-    )
-    effect.setFloat('camTanFov', Math.tan(camera.fov * 0.5))
-    effect.setVector2('resolution', new Vector2(engine.getRenderWidth(), engine.getRenderHeight()))
   })
 
   raymarchPass.onApplyObservable.add((effect) => {
@@ -520,6 +573,9 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     }
     last_sum = new_sum
     effect.setInt('programLength', shader_data.programLength)
+    effect.setUInt('cameraOrtho', camera.mode === Camera.ORTHOGRAPHIC_CAMERA ? 1 : 0)
+    effect.setFloat('camOrthoHalfWidth', (camera.orthoRight - camera.orthoLeft) * 0.5)
+    effect.setFloat('camOrthoHalfHeight', (camera.orthoTop - camera.orthoBottom) * 0.5)
     engine.setStorageBuffer('raymarch_depth_out_buffer', raymarch_depth_out_buffer)
     engine.setStorageBuffer('raymarch_shape_out_buffer', raymarch_shape_out_buffer)
     engine.setStorageBuffer('hovered_shape', hovered_shape_buffer)
@@ -569,6 +625,25 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     ShaderLanguage.WGSL,
   )
 
+  compositePass.onApplyObservable.addOnce((effect) => {
+    compositePass.onBeforeRenderObservable.add(async (effect) => {
+
+
+      const canvasWidth = engine.getRenderWidth()
+      const canvasHeight = engine.getRenderHeight()
+      // Normalize X from 0 to 1
+      const x = scene.pointerX / (canvasWidth * global_settings.display.resolution_multiplier)
+      // Flip the Y coordinate: pointer 0 (top) -> 1, pointer canvasHeight (bottom) -> 0
+      const y =
+        1.0 - scene.pointerY / (canvasHeight * global_settings.display.resolution_multiplier)
+      const mouseUV = new Vector2(x, y)
+      let picked_id = await shapePicker.pick(mouseUV)
+      if (picked_id != state.selected_shape_id) {
+        if (state.trigger_redraw >= 0) state.trigger_redraw = 10
+        state.selected_shape_id_buffer = picked_id
+      }
+    })
+  })
   compositePass.onApplyObservable.add((effect) => {
     effect.setVector2(
       'iResolution',

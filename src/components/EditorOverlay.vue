@@ -2,8 +2,27 @@
     <q-splitter before-class="sdfe-do-not-overflow" after-class="se_panel_root" class="absolute-full"
         v-model="splitWidth">
         <template #before>
-            <GlobalSettings></GlobalSettings>
-            <slot></slot>
+            <!-- Draggable FAB in the bottom-right corner -->
+            <div class="">
+                <q-page-sticky class="q-pa-md" style="z-index: 99999" position="top-left">
+                    <SceneSelector />
+                    <div>
+                        <q-btn @click="showSettings = true" fab-mini icon="mdi-cog-outline" flat
+                            style="color: #181818" />
+                    </div>
+                    <div>
+                        <q-btn @click="showCheatSheet = true" fab-mini icon="mdi-help-circle-outline" flat
+                            style="color: #181818" />
+                    </div>
+                </q-page-sticky>
+
+
+            </div>
+            <!-- Settings & Cheat‐sheet modals -->
+            <GlobalSettingsModal v-model="showSettings" />
+            <CheatSheetOverlay v-model="showCheatSheet" />
+
+            <slot />
         </template>
         <template #after v-if="sdf_scene">
             <q-splitter before-class="se_panel" after-class="se_panel" id="splitter_view" v-model="splitPanelHeight"
@@ -53,18 +72,23 @@
 
                             <q-tab-panel v-if="selected" name="modifiers">
                                 <!-- Add-child dropdown, only for group nodes -->
-                                <q-btn-dropdown text-color="white" dense dropdown-icon="none" size="sm" flat unelevated
+                                <q-btn-dropdown ref="dropdowns" :ref-key="i" dense dropdown-icon="none" size="sm" flat
                                     style="pointer-events:auto;">
                                     <template v-slot:label>
-                                        <q-icon name="mdi-plus"></q-icon>
+                                        <q-icon name="mdi-plus" />
                                     </template>
-                                    <LibraryPicker @set-model="addModifier" />
+
+                                    <!-- pass the index along so the handler knows which to close -->
+                                    <LibraryPicker @set-model="val => onModifierPick(val, i)" />
                                 </q-btn-dropdown>
                                 <template v-if="selected?.modifiers?.length">
                                     <div v-for="(m, i) in selected.modifiers" :key="i"
                                         class="modifier-item q-mb-md q-pa-sm bg-grey-8 rounded">
+
                                         <!-- Op field -->
-                                        <q-input dense dark filled v-model="m.op" label="Op" class="q-mb-sm" />
+                                        <q-input dense dark filled v-model="m.op" label="Op" class="q-mb-sm" /> <q-btn
+                                            text-color="white" size="xs" dense flat round icon="mdi-delete-outline"
+                                            @click.stop="selected.removeModifier(i)" style="pointer-events:auto;" />
 
                                         <!-- args: inline label + editor -->
                                         <div class="row wrap">
@@ -93,31 +117,57 @@
 </template>
 
 <script>
+import SD_LIB from 'src/lib/sd-lib'
+import { ref, watch as vueWatch } from 'vue'      // only if you still need watch in setup of other comps
+import TreeNode from './TreeNode.vue'
+import LibraryPicker from './LibraryPicker.vue'
+import VectorOrScalarEditor from './VectorOrScalarEditor.vue'
+import CheatSheetOverlay from './CheatSheetOverlay.vue'
+import GlobalSettingsModal from './GlobalSettings.vue'
+import SceneSelector from "./SceneSelector.vue"
 
-import SD_LIB from "src/lib/sd-lib"
-import TreeNode from "./TreeNode.vue"
-import LibraryPicker from "./LibraryPicker.vue"
-import VectorOrScalarEditor from "./VectorOrScalarEditor.vue"
-import GlobalSettings from "./GlobalSettings.vue"
 export default {
-    name: "EditorOverlay",
-    components: { TreeNode, VectorOrScalarEditor, GlobalSettings, LibraryPicker },
-    watch: {
-        "state.selected_shape_id": {
-            handler(newVal, oldVal) {
-                this.selected = this.sdf_scene.findNodeById(newVal)
-            }
-        }
+    name: 'EditorOverlay',
+    components: {
+        SceneSelector,
+        TreeNode,
+        VectorOrScalarEditor,
+        LibraryPicker,
+        CheatSheetOverlay,
+        GlobalSettingsModal
     },
+
+    inject: ['sdf_scene', 'adapter', 'state'],
+
     data() {
         return {
-            selected: null,
-            activeTab: "object",
+            // splitters
             splitWidth: 70,
             splitPanelHeight: 50,
-            draggingId: null
+
+            // selection & props panel
+            selected: null,
+            activeTab: 'object',
+
+            // drag/drop
+            draggingId: null,
+
+            // FAB state
+            fabPos: [18, 18],
+            draggingFab: false,
+
+            // dialog flags
+            showSettings: false,
+            showCheatSheet: false
         }
     },
+
+    watch: {
+        'state.selected_shape_id'(newId) {
+            this.selected = this.sdf_scene.findNodeById(newId)
+        }
+    },
+
     provide() {
         return {
             draggingId: () => this.draggingId,
@@ -127,74 +177,65 @@ export default {
             doSelect: this.doSelect
         }
     },
-    inject: ['sdf_scene', 'adapter', 'state'],
 
     computed: {
         colorModel: {
             get() {
-                return this.matToRbga(this.selected?.material)
+                if (!this.selected?.material) return 'rgba(0,0,0,1)'
+                const [r, g, b] = [this.selected.material.r, this.selected.material.g, this.selected.material.b]
+                    .map(c => Math.round(c * 255))
+                return `rgba(${r},${g},${b},${this.selected.material.a})`
             },
             set(rgba) {
-                const parts = rgba
-                    .replace(/rgba?\(|\)/g, "")
-                    .split(",")
-                    .map(s => s.trim())
-                const [r, g, b, a] = parts.map((v, i) =>
-                    i < 3 ? parseInt(v, 10) / 255 : parseFloat(v)
-                )
+                const parts = rgba.replace(/rgba?\(|\)/g, '').split(',').map(s => s.trim())
+                const [r, g, b, a] = parts.map((v, i) => i < 3 ? parseInt(v) / 255 : parseFloat(v))
                 if (this.selected?.material) {
                     Object.assign(this.selected.material, { r, g, b, a })
                 }
             }
         }
     },
+
     methods: {
-        addModifier(val) {
+
+        // —— Modifiers & tree ops —— 
+        onModifierPick(val, i) {
             this.selected.addModifier(val.value)
+            this.$nextTick(() => {
+                const dd = this.$refs.dropdowns[i]
+                dd?.hide?.()
+            })
         },
-        // find node by id
-        findById(id) {
-            const recurse = n => {
-                if (n.id === id) return n
-                for (const c of n.children || []) {
-                    const f = recurse(c)
-                    if (f) return f
-                }
-                return null
+
+        findById(id, node = this.sdf_scene.root) {
+            if (node.id === id) return node
+            for (const c of node.children || []) {
+                const found = this.findById(id, c)
+                if (found) return found
             }
-            return recurse(this.sdf_scene.root)
+            return null
         },
 
-        // only Boolean ops are valid “groups”
         isGroupOp(opName) {
-            return Object.prototype.hasOwnProperty.call(
-                SD_LIB.BOOLEAN_OPS,
-                opName
-            )
+            return Object.prototype.hasOwnProperty.call(SD_LIB.BOOLEAN_OPS, opName)
         },
 
-        // drag/drop validator
         validateDrop(targetId) {
             const dest = this.findById(targetId)
             return dest && this.isGroupOp(dest.op)
         },
 
-        matToRbga(m) {
-            if (!m) return "rgba(0,0,0,1)"
-            const [r, g, b] = [m.r, m.g, m.b].map(c => Math.round(c * 255))
-            return `rgba(${r},${g},${b},${m.a})`
-        },
         startDrag(id) {
             this.draggingId = id
         },
 
         doMove(targetId) {
-            const srcId = this.draggingId
-            if (!srcId || srcId === targetId) {
+            const src = this.draggingId
+            if (!src || src === targetId) {
                 this.draggingId = null
                 return
             }
-            // find node + parent
+            // find origin + parent
             const findWithParent = (cur, id, parent = null) => {
                 if (cur.id === id) return { node: cur, parent }
                 for (const c of cur.children || []) {
@@ -202,14 +243,14 @@ export default {
                     if (res) return res
                 }
             }
-            const origin = findWithParent(this.sdf_scene.root, srcId)
+            const origin = findWithParent(this.sdf_scene.root, src)
             const dest = this.findById(targetId)
             if (!origin?.parent || !dest) {
                 this.draggingId = null
                 return
             }
-            const sibs = origin.parent.children
-            sibs.splice(sibs.findIndex(n => n.id === srcId), 1)
+            const siblings = origin.parent.children
+            siblings.splice(siblings.findIndex(n => n.id === src), 1)
             dest.children = dest.children || []
             dest.children.push(origin.node)
             this.draggingId = null
@@ -220,28 +261,17 @@ export default {
             this.state.selected_shape_id = node.id
         },
 
-
-
-
-
-        // add a new child under parentId
         addNode(parentId, opName) {
-
             const parent = this.findById(parentId)
-            if (!parent) {
-                console.warn("Parent not found:", parentId)
-                return
-            }
+            if (!parent) return console.warn('Parent not found:', parentId)
             const cfg = this.makeConfigFromLib(opName)
-            // debugger
             parent.children = parent.children || []
             parent.addChild(cfg)
-            // this.adapter.sync()
-        },
-
-
+        }
     }
 }
 </script>
 
-<style lang="scss" scoped></style>
+<style scoped lang="scss">
+/* no extra styles needed */
+</style>
