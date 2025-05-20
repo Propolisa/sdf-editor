@@ -53,7 +53,9 @@ export default defineConfig((/* ctx */) => {
       // polyfillModulePreload: true,
       // distDir
 
-      // extendViteConf (viteConf) {},
+      extendViteConf (viteConf) {
+        viteConf.base = "/sdf-editor/"
+      },
       // viteVuePluginOptions: {},
 
       vitePlugins: [
