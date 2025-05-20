@@ -54,7 +54,7 @@ export default defineConfig((/* ctx */) => {
       // distDir
 
       extendViteConf (viteConf) {
-        viteConf.base = "/sdf-editor/"
+        viteConf.base = "/sdf-editor/spa"
       },
       // viteVuePluginOptions: {},
 
