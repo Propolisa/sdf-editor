@@ -21,6 +21,7 @@
     "@babylonjs/materials": "^8.8.4",
     "@quasar/extras": "^1.16.4",
     "@types/localforage": "^0.0.34",
+    "@vueuse/core": "^13.2.0",
     "axios": "^1.2.1",
     "localforage": "^1.10.0",
     "pinia": "^3.0.1",

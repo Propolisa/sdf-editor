@@ -20,7 +20,7 @@ export const useScenesStore = defineStore('scenes', {
       },
     },
     // The key of the active scene
-    activeScene: 'DEFAULT',
+    activeScene: 'BLOBBY',
   }),
 
   getters: {

@@ -357,6 +357,7 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
   watch(
     toRef(state, 'selected_shape_id'),
     (newValue, oldValue) => {
+      sdf_scene.onNodeSelectedObservable.notifyObservers([newValue, oldValue])
       gizmoManager.attachToMesh(scene.getMeshByName('node_' + state.selected_shape_id))
     },
     { immediate: true },

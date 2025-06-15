@@ -596,6 +596,8 @@ export class SDFScene {
     // Build the actual tree; root will register itself (and its subtree)
     this.root = new SDFNode(sceneJson, this, null)
     this.onNeedsRedrawObservable = new Observable()
+    this.selectedNodeId = 0
+    this.onNodeSelectedObservable = new Observable()
   }
 
   // — Adapter API —
