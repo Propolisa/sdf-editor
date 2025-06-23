@@ -63,8 +63,10 @@ const global_settings = reactive({
     show_world_grid: true,
     disable_animations: false,
     render_only_on_change: false
-  }
+  },
+  extract: {enabled: false}
 })
+
 const state = reactive({
   selected_shape_id: 0,
   selected_shape_id_buffer: 0,
@@ -165,9 +167,7 @@ async function initializeScene() {
   // your dynamic SDFScene Reactive
   const sdfObj = new ReactiveSDFScene(sceneData)
 
-  sdfObj.onNeedsRedrawObservable.add(() => {
-    state.trigger_redraw = 1
-  })
+ 
   // recursively replace every node.children with a reactive array:
   function makeTreeReactive(node) {
     node.children = shallowReactive(node.children)
@@ -186,8 +186,24 @@ async function initializeScene() {
 
   setupRaymarchingPp(scene.value, camera, light.direction, sdf, global_settings, state)
   setupEditorView(scene.value, camera, global_settings, state, sdf)
+  let meshing_initialized = false
+  let regenerate_mesh, update_grid_and_regenerate_mesh
   
-  // setupMarchingCubes(scene.value, sdf, global_settings, state)
+
+  watch(toRef(global_settings.extract, "enabled"), (newVal) => {
+    if (newVal && !meshing_initialized) {
+        let {regenerate_mesh: rm, update_grid_and_regenerate_mesh: ug} = setupMarchingCubes(scene.value, sdf, global_settings, state)
+        regenerate_mesh = rm
+        update_grid_and_regenerate_mesh = ug
+      }
+  })
+  
+   sdfObj.onNeedsRedrawObservable.add(() => {
+    state.trigger_redraw = 1
+    if (global_settings.extract.enabled) regenerate_mesh()
+  })
+
+
   camera.beta = 1.3
   camera.alpha = Tools.ToRadians(135)
   camera.radius = 11

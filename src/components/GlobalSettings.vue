@@ -4,6 +4,19 @@
       <q-card-section class="text-h6">Global Settings</q-card-section>
       <q-separator dark />
       <q-card-section class="column q-gutter-md">
+         <q-item dark>
+          <q-item-section side class="text-white">Meshing</q-item-section>
+          <q-item-section>
+            <q-toggle
+          v-model="global_settings.extract.enabled"
+          checked-icon="check"
+          unchecked-icon="clear"
+          dark
+          color="primary"
+          label="Enabled"
+        />
+          </q-item-section>
+        </q-item>
         <q-item dark>
           <q-item-section side class="text-white">Display Mode</q-item-section>
           <q-item-section>
