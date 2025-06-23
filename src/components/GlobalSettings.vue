@@ -10,7 +10,10 @@
             <q-select
               v-model="global_settings.display.mode"
               :options="modeOptions"
+              emit-value
+              
               dense
+              
               hide-dropdown-icon
               outlined
               dark
@@ -118,6 +121,7 @@
 </template>
 
 <script>
+import { DISPLAY_MODES } from "../lib/enums.js"
 export default {
   name: "GlobalSettingsDialog",
   inject: ["global_settings"],
@@ -143,10 +147,8 @@ export default {
       }
     },
     modeOptions() {
-      return [
-        { label: "Raymarch", value: "raymarch" },
-        { label: "Rasterize", value: "rasterize" }
-      ]
+      return     Object.entries(DISPLAY_MODES).map(([label, value]) => ({label, value}))
+      
     }
   },
   methods: {

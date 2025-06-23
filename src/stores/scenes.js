@@ -1,26 +1,16 @@
 import { defineStore, acceptHMRUpdate } from 'pinia'
-import { BLOBBY, DEFAULT, FISH } from 'src/lib/scenes'
+import {  SCENES } from 'src/lib/scenes'
 import localforage from 'localforage'
 
 export const useScenesStore = defineStore('scenes', {
   state: () => ({
     // Each scene holds its serialized JSON plus a history of revisions
-    scenes: {
-      BLOBBY: {
-        current: JSON.stringify(BLOBBY),
+    scenes: Object.fromEntries(Object.entries(SCENES).map(([name, scene]) => [name, {current: JSON.stringify(scene),
         revisions: [],
-      },
-      FISH: {
-        current: JSON.stringify(FISH),
-        revisions: [],
-      },
-      DEFAULT: {
-        current: JSON.stringify(DEFAULT),
-        revisions: [],
-      },
-    },
+      }]
+    )),
     // The key of the active scene
-    activeScene: 'BLOBBY',
+    activeScene: 'DEFAULT',
   }),
 
   getters: {

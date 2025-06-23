@@ -360,11 +360,11 @@ const OP_POP_CONTEXT : i32 = ${opMap.popContext};
 ///////////////////////////////////////////
 
 // distance‐only evaluation
-var<private> evalStack      : array<f32, 64>;
+var<private> evalStack      : array<f32, 16>;
 var<private> stackPtr       : i32 = 0;
 
 // material + shapeID
-var<private> resultStack    : array<SdResult, 64>;
+var<private> resultStack    : array<SdResult, 16>;
 var<private> resultStackPtr : i32 = 0;
 
 // pack position.xyz + scale in .w
@@ -706,166 +706,138 @@ function generateBooleanSwitchCaseBlock(def, matVariant = false) {
   if (!matVariant) {
     return `
 case ${OPC}: {
-  ${loadParam}
+  ${ hasParam
+      ? `let p0: f32 = uniforms.program[pc]; pc = pc + 1u;
+         let k: f32  = p0 * currentScale;`
+      : ''
+  }
   // pop two distances
-  stackPtr -= 1;
+  stackPtr = stackPtr - 1;
   let b = evalStack[stackPtr];
-  stackPtr -= 1;
+  stackPtr = stackPtr - 1;
   let a = evalStack[stackPtr];
-  // compute
-  let res = ${def.fn_name}(a, b${hasParam ? ', p0' : ''});
+
+  // compute with scaled blend-radius
+  let res = ${name}(a, b${hasParam ? ', k' : ''});
   evalStack[stackPtr] = res;
-  stackPtr += 1;
+  stackPtr = stackPtr + 1;
   break;
 }
 `
   }
 
-  // — material variant —
+  if (matVariant) {
   return `
 case ${OPC}: {
-  ${loadParam}
-  // pop two results
-  resultStackPtr -= 1;
+  // --- read & scale the raw blend/chamfer radius ---
+  ${hasParam
+    ? `let p0: f32 = uniforms.program[pc]; pc = pc + 1u;
+       let k:  f32 = p0 * currentScale;`
+    : ''
+  }
+
+  // --- pop the two SdResults ---
+  resultStackPtr = resultStackPtr - 1;
   let rb = resultStack[resultStackPtr];
-  resultStackPtr -= 1;
+  resultStackPtr = resultStackPtr - 1;
   let ra = resultStack[resultStackPtr];
 
-  // compute raw distance
-  let dist = ${def.fn_name}(ra.dist, rb.dist${hasParam ? ', p0' : ''});
+  // --- compute the world-space distance with scaled k ---
+  let dist = ${def.fn_name}(
+    ra.dist,
+    rb.dist${hasParam ? ', k' : ''}
+  );
 
-  // determine output color + ID
+  // --- pick color & shapeID, now using k in chamfer/smooth ---
   var color: vec4<f32>;
   var id:    u32;
 
-  ${
-    isUnion
-      ? `
-    // exact union: pick nearer branch
-    color = select(rb.color, ra.color, ra.dist < rb.dist);
-    id    = select(rb.shapeID, ra.shapeID, ra.dist < rb.dist);
-  `
-      : ''
-  }
+  ${isUnion ? `// exact union
+  color = select(rb.color, ra.color, ra.dist < rb.dist);
+  id    = select(rb.shapeID, ra.shapeID, ra.dist < rb.dist);` : ''}
 
-  ${
-    isSubtract
-      ? `
-    // exact subtraction: always minuend
-    color = ra.color;
-    id    = ra.shapeID;
-  `
-      : ''
-  }
+  ${isSubtract ? `// exact subtract
+  color = ra.color;
+  id    = ra.shapeID;` : ''}
 
-  ${
-    isIntersect
-      ? `
-    // exact intersection: pick farther branch
-    color = select(ra.color, rb.color, ra.dist < rb.dist);
-    id    = select(ra.shapeID, rb.shapeID, ra.dist < rb.dist);
-  `
-      : ''
-  }
+  ${isIntersect ? `// exact intersect
+  color = select(ra.color, rb.color, ra.dist < rb.dist);
+  id    = select(ra.shapeID, rb.shapeID, ra.dist < rb.dist);` : ''}
 
-  ${
-    isChamfer
-      ? `
-    // chamfer: min(d1,d2) vs blend‐region
-    let baseWin = ra.dist < rb.dist;
-    let chamWin = min(ra.dist, rb.dist) < (ra.dist - p0 + rb.dist) * 0.5;
-    // if chamWin==false fallback to nearer
-    color = select(select(rb.color, ra.color, baseWin),
-                   select(rb.color, ra.color, baseWin),
-                   chamWin);
-    id    = select(select(rb.shapeID, ra.shapeID, baseWin),
-                   select(rb.shapeID, ra.shapeID, baseWin),
-                   chamWin);
-  `
-      : ''
-  }
+  ${isChamfer ? `// chamfer union/subtract/intersect
+  let baseWin  = ra.dist < rb.dist;
+  let chamWin  = min(ra.dist, rb.dist)
+               < (ra.dist ${name.includes('Subtract') ? '+' : '-'} k + rb.dist) * 0.5;
+  color = select(
+    select(rb.color, ra.color, baseWin),
+    select(rb.color, ra.color, baseWin),
+    chamWin
+  );
+  id    = select(
+    select(rb.shapeID, ra.shapeID, baseWin),
+    select(rb.shapeID, ra.shapeID, baseWin),
+    chamWin
+  );` : ''}
 
-  ${
-    isSmooth
-      ? `
-    // smooth blend
-    let h = clamp(0.5 + 0.5 * (rb.dist - ra.dist) / p0, 0.0, 1.0);
-    color = mix(rb.color, ra.color, h);
-    id    = select(rb.shapeID, ra.shapeID, ra.dist < rb.dist);
-  `
-      : ''
-  }
+  ${isSmooth ? `// smooth union/subtract/intersect
+  let h = clamp(
+    0.5 + 0.5 * (rb.dist - ra.dist) / k,
+    0.0, 1.0
+  );
+  color = mix(rb.color, ra.color, h);
+  id    = select(rb.shapeID, ra.shapeID, ra.dist < rb.dist);` : ''}
 
-  // push back
-  resultStack[resultStackPtr] = SdResult(dist, vec3<f32>(0.0, 0.0, 0.0),  1.0, color, id);
-  resultStackPtr += 1;
+  // --- push the blended result back on the stack ---
+  resultStack[resultStackPtr] = SdResult(
+    dist,
+    vec3<f32>(0.0, 0.0, 0.0),
+    1.0,
+    color,
+    id
+  );
+  resultStackPtr = resultStackPtr + 1;
   break;
 }
 `
 }
+}
 
 function generatePositioningSwitchCaseBlock(def) {
-  const fnName = def.fn_name
-  const OPC = `OP_${toUpperSnakeCase(fnName)}`
-  const args = Object.entries(def.args).filter(([n, _]) => n !== 'p')
+  const fnName = def.fn_name;
+  const OPC    = `OP_${toUpperSnakeCase(fnName)}`;
+  const args   = Object.entries(def.args).filter(([n]) => n !== 'p');
 
-  // count how many floats to read for a given type
-  function floatCount(type) {
-    switch (type) {
-      case 'f32':
-        return 1
-      case 'vec2f':
-        return 2
-      case 'vec3f':
-        return 3
-      case 'vec4f':
-        return 4
-      case 'mat4x4<f32>':
-        return 16
-      default:
-        return 1
-    }
+  return `
+case ${OPC}: {
+  // 1) read all arguments
+  ${args.map(([name, type]) => readUniform(type, name)).join('\n  ')}
+
+  // 2) push the old (point,scale) onto the context stack
+  pointStack[ptStackPtr] = vec4<f32>(currentP, currentScale);
+  ptStackPtr = ptStackPtr + 1;
+
+  // 3) apply warp & accumulate scale
+  ${
+    fnName === 'opScale'
+      ? `// uniform scale
+  currentP = currentP / s;
+  currentScale = currentScale * s;`
+      : fnName === 'opTransform'
+      ? `// inverse transform (matrix is world→local)
+  currentP = opTransform(currentP, transform);
+  // extract inverse‐scale from the first column
+  let invS = length(transform[0].xyz);
+  let s    = 1.0 / invS;
+  currentScale = currentScale * s;`
+      : `// generic warp (e.g. opTranslate, op90RotateX…)
+  currentP = ${fnName}(currentP${
+        args.length ? ', ' + args.map(([n]) => n).join(', ') : ''
+      });`
   }
-
-  // start building the case block
-  let code = [`case ${OPC}: {`]
-
-  // 1) read all args (for opScale that's just 's')
-  for (let [argName, argType] of args) {
-    code.push(readUniform(argType, argName))
-  }
-
-  // 2) push packed (position.xyz, scale) onto the same stack
-  code.push(`  // pack old position & scale`)
-  code.push(`  pointStack[ptStackPtr] = vec4<f32>(currentP, currentScale);`)
-  code.push(`  ptStackPtr = ptStackPtr + 1;`)
-
-  // 3) apply your warp *and* accumulate any scale
-  if (fnName === 'opScale') {
-    // exactly as before
-    code.push(`  currentP = currentP / s;`)
-    code.push(`  currentScale = currentScale * s;`)
-  } else if (fnName === 'opTransform') {
-    // inverse(transform) is inside your WGSL fn,
-    // but here we extract the *uniform* scale from the matrix itself
-    code.push(`  // extract uniform scale from the local→world basis vector`)
-    code.push(`  let basisX = transform[0].xyz;            // first column`)
-    code.push(`  let invS = length(basisX);`)
-    code.push(`  let s    = 1.0 / invS;`)
-    code.push(`  currentScale = currentScale * s;`)
-    code.push(`  currentP     = opTransform(currentP, transform);`)
-  } else {
-    // generic case: just call the warp
-    const callArgs = ['currentP'].concat(args.map(([n]) => n)).join(', ')
-    code.push(`  currentP = ${fnName}(${callArgs});`)
-  }
-
-  // 4) done
-  code.push(`  break;`)
-  code.push(`}`)
-
-  return code.join('\n')
+  break;
+}`
 }
+
 
 /**
  * Emit WGSL code lines to read `name` of given `type` from uniforms.program[pc..]

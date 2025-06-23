@@ -1,15 +1,38 @@
 <template>
+  <q-splitter 
+    before-class="sdfe-do-not-overflow"
+    after-class="se_panel_root"
+    separator-style="background:#ccc"
+    class="absolute-full"
+    :horizontal="orientation == 'portrait-primary' || orientation ==  'portrait-secondary' ? false : true"
+    v-model="menuWidth" unit="px" 
+  >
+  <template #before>
+     <q-bar class="fit" >
+      <q-btn dense flat icon="mdi-palette" />
+      <div>
+        SDF Editor
+      </div>
+
+
+      <q-space />
+
+      <div class="q-px-sm">{{ formattedTime }}</div>
+
+    </q-bar>
+  </template>
+  <template #after>
   <q-splitter
     before-class="sdfe-do-not-overflow"
     after-class="se_panel_root"
-    class="absolute-full"
+    class="fill"
     :horizontal="orientation == 'portrait-primary' || orientation ==  'portrait-secondary' ? true : false"
     v-model="splitWidth"
   >
     <template #before>
       <!-- Draggable FAB in the bottom-right corner -->
       <div class="">
-        <q-page-sticky class="q-pa-md" style="z-index: 99999" position="top-left">
+        <q-page-sticky class="q-pa-md" style="z-index: 99999; position:absolute" position="top-left">
           <SceneSelector />
           <div>
             <q-btn
@@ -102,11 +125,11 @@
                 <div v-else>No material</div>
               </q-tab-panel>
 
-              <q-tab-panel v-if="selected" name="modifiers">
-                <!-- Add-child dropdown, only for group nodes -->
+              <q-tab-panel v-if="selected && selected.modifiers" key="selected.id" name="modifiers">
+                <!-- Add-child dropdown, only for group nodes --> 
                 <q-btn-dropdown
                   ref="dropdowns"
-                  :ref-key="i"
+                  ref-key="i"
                   dense
                   dropdown-icon="none"
                   size="sm"
@@ -172,11 +195,13 @@
       </q-splitter>
     </template>
   </q-splitter>
+   </template>
+  </q-splitter>
 </template>
 
 <script>
 import SD_LIB from "src/lib/sd-lib"
-import { ref, watch as vueWatch } from "vue" // only if you still need watch in setup of other comps
+import { ref, computed, watch as vueWatch } from "vue" // only if you still need watch in setup of other comps
 import TreeNode from "./TreeNode.vue"
 import LibraryPicker from "./LibraryPicker.vue"
 import VectorOrScalarEditor from "./VectorOrScalarEditor.vue"
@@ -184,6 +209,7 @@ import CheatSheetOverlay from "./CheatSheetOverlay.vue"
 import GlobalSettingsModal from "./GlobalSettings.vue"
 import SceneSelector from "./SceneSelector.vue"
 import { useScreenOrientation } from "@vueuse/core"
+import { useIntervalFn } from 'src/composables/useIntervalFn.js'
 
 export default {
   name: "EditorOverlay",
@@ -199,16 +225,33 @@ export default {
   inject: ["sdf_scene", "adapter", "state"],
   setup() {
     const { orientation } = useScreenOrientation()
+    const time = ref(new Date())
+    useIntervalFn(() => {
+      time.value = new Date()
+    }, 60000)
 
-    return { orientation }
+    const formattedTime = computed(() => {
+      const d = time.value
+      const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+      const dayName = days[d.getDay()]
+      const day = String(d.getDate()).padStart(2, '0')
+      const hh = String(d.getHours()).padStart(2, '0')
+      const mm = String(d.getMinutes()).padStart(2, '0')
+      return `${dayName} ${day}, ${hh}:${mm}`
+    })
+    return { time, orientation, formattedTime }
   },
 
   
+  
   data() {
     return {
+
       // splitters
       splitWidth: 70,
       splitPanelHeight: 50,
+
+      menuWidth: 24,
 
       // selection & props panel
       selected: null,
@@ -271,6 +314,7 @@ export default {
   },
 
   methods: {
+    
     // —— Modifiers & tree ops ——
     onModifierPick(val, i) {
       this.selected.addModifier(val.value)
@@ -345,6 +389,7 @@ export default {
       parent.addChild(cfg)
     }
   }
+
 }
 </script>
 

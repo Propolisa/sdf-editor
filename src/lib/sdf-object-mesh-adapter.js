@@ -18,30 +18,32 @@ export class SDFBabylonAdapter {
    * @param {BABYLON.Scene} babylonScene
    */
   constructor(sdfScene, babylonScene) {
+    this.dummy = new MeshBuilder.CreateBox("unattached_pointer", {size:.5}, babylonScene)
+    this.dummy.isVisible = true
     this.sdfScene = sdfScene
     this.babylonScene = babylonScene
     this.nodeMap = new Map() // SDFNode -> Mesh
     this._gizmoMap = new Map() // SDFNode -> BoundingBoxGizmo
 
-    // Utility layer for all gizmos
-    this._utilLayer = new UtilityLayerRenderer(this.babylonScene)
-    this._utilLayer.setRenderCamera(babylonScene.activeCamera)
-    this._utilLayer.utilityLayerScene.autoClearDepthAndStencil = false
+    // // Utility layer for all gizmos
+    // this._utilLayer = new UtilityLayerRenderer(this.babylonScene)
+    // this._utilLayer.setRenderCamera(babylonScene.activeCamera)
+    // this._utilLayer.utilityLayerScene.autoClearDepthAndStencil = false
 
     // Listen for selection changes to show/hide gizmos
-    this.sdfScene.onNodeSelectedObservable.add(([newId, oldId]) => {
-      const newNode = this._getNodeById(newId)
-      const oldNode = this._getNodeById(oldId || 0)
-      // Hide gizmo for previously selected node
-      if (oldNode && this._gizmoMap.has(oldNode)) {
-        this._gizmoMap.get(oldNode).attachedMesh = null
-      }
-      // Show gizmo for newly selected node
-      if (newNode && this._gizmoMap.has(newNode)) {
-        const mesh = this.nodeMap.get(newNode)
-        this._gizmoMap.get(newNode).attachedMesh = mesh
-      }
-    })
+    // this.sdfScene.onNodeSelectedObservable.add(([newId, oldId]) => {
+    //   const newNode = this._getNodeById(newId)
+    //   const oldNode = this._getNodeById(oldId || 0)
+    //   // Hide gizmo for previously selected node
+    //   if (oldNode && this._gizmoMap.has(oldNode)) {
+    //     this._gizmoMap.get(oldNode).attachedMesh = this.dummy
+    //   }
+    //   // Show gizmo for newly selected node
+    //   if (newNode && this._gizmoMap.has(newNode)) {
+    //     const mesh = this.nodeMap.get(newNode)
+    //     this._gizmoMap.get(newNode).attachedMesh = mesh
+    //   }
+    // })
 
     this.sync()
   }
@@ -55,8 +57,8 @@ export class SDFBabylonAdapter {
         this.nodeMap.set(node, mesh)
 
         // Create a gizmo but don't attach it until selection
-        const gizmo = new BoundingBoxGizmo(Color3.FromHexString('#0984e3'), this._utilLayer)
-        gizmo.attachedMesh = null
+        const gizmo = new BoundingBoxGizmo(Color3.FromHexString('#0984e3'))
+        gizmo.attachedMesh = this.dummy
         this._gizmoMap.set(node, gizmo)
       }
     })
@@ -102,7 +104,7 @@ export class SDFBabylonAdapter {
     )
     mesh.material = new StandardMaterial()
     mesh.material.alpha = 0
-    mesh.name = node.name || `node_${node.id}`
+    mesh.name = `node_${node.id}`
 
     // 2) Apply any existing SDF modifiers (translate/rotate/scale)
     this._applyModifiersToMesh(node, mesh)
@@ -122,12 +124,15 @@ export class SDFBabylonAdapter {
       } = mesh.rotationQuaternion ? mesh.rotationQuaternion.toEulerAngles() : mesh.rotation
       const { x: sx } = mesh.scaling
 
+      function almostEquals(val, target, threshold=0.00001){
+        return Math.abs(target - val) < threshold
+      }
       const need = {
-        opTranslate: px !== 0 || py !== 0 || pz !== 0,
-        opRotateX: rx !== 0,
-        opRotateY: ry !== 0,
-        opRotateZ: rz !== 0,
-        opScale: sx !== 1,
+        opTranslate: !almostEquals(px, 0) || !almostEquals(py, 0)  || !almostEquals(pz, 0) ,
+        opRotateX: !almostEquals(rx, 0),
+        opRotateY: !almostEquals(ry, 0),
+        opRotateZ: !almostEquals(rz, 0),
+        opScale: !almostEquals(sx, 1),
       }
       const hasMod = (op) => node.modifiers.some((m) => m.op === op)
       const missingAny = Object.entries(need).some(([op, needed]) => needed && !hasMod(op))
@@ -171,6 +176,7 @@ export class SDFBabylonAdapter {
       mesh.position.copyFrom(translation)
       mesh.scaling.copyFrom(scaling)
       mesh.rotationQuaternion = rotationQuaternion
+      mesh.computeWorldMatrix(true)
       return
     }
     const get = (op) => node.modifiers.find((m) => m.op === op)?.args
@@ -178,11 +184,12 @@ export class SDFBabylonAdapter {
     const rx = get('opRotateX')?.a ?? 0
     const ry = get('opRotateY')?.a ?? 0
     const rz = get('opRotateZ')?.a ?? 0
-    const sArg = get('opScale')?.s
+    const sArg = get('opScale')?.s ?? 1
     const s = sArg != null ? [sArg, sArg, sArg] : [1, 1, 1]
     mesh.position.set(...t)
     mesh.rotation.set(rx, ry, rz)
     mesh.scaling.set(...s)
+    mesh.computeWorldMatrix(true)
   }
 
   _writeBackModifier(node, op, value) {

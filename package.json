@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@babylonjs/core": "^8.6.1",
+    "@babylonjs/gui": "^8.6.1",
     "@babylonjs/materials": "^8.8.4",
     "@quasar/extras": "^1.16.4",
     "@types/localforage": "^0.0.34",

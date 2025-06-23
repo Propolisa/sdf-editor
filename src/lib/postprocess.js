@@ -16,6 +16,7 @@ import { generateWGSL } from './sd-scene-shader-representation'
 import { watch, toRef } from 'vue'
 import { createShapePicker } from './raymarch_picking_compute_shader'
 import { createShapePickerJS } from './raymarch_picking'
+import { DISPLAY_MODES } from './enums'
 // TERMS:
 // SDFSceneInstance
 // SDFSceneJSON
@@ -64,6 +65,7 @@ export function setupRaymarchingPp(
         uniform lightDir: vec3<f32>;
         uniform maxSteps: u32;
         uniform maxDist: f32;
+        uniform reuseDepth : u32;
         
         varying vUV: vec2<f32>;
     
@@ -270,15 +272,36 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     let rayOrigin = ray.origin;
     let rayDir    = ray.dir;
 
-    // 3) Raymarch
-    let hitRes = raymarch(rayOrigin, rayDir);
-
-    // 4) Pixel coords (for depth & picking)
+    // compute pixel offset once
     let fragPx = vec2<i32>(
-        i32(uv.x * uniforms.iResolution.x),
-        i32(uv.y * uniforms.iResolution.y)
+      i32(uv.x * uniforms.iResolution.x),
+      i32(uv.y * uniforms.iResolution.y)
     );
+    let idx = fragPx.y * i32(uniforms.iResolution.x) + fragPx.x;
 
+    // grab last frame’s values:
+    var hitRes   : RayHit;
+
+    // only re-raymarch if the app asked for a redraw
+    if (uniforms.reuseDepth == 0u) {
+        hitRes = raymarch(rayOrigin, rayDir);
+
+        // save new depth & shape into the buffer
+        raymarch_depth_out_buffer[idx] = hitRes.distance;
+        raymarch_shape_out_buffer[idx] = hitRes.shapeID;
+    } else {
+         // grab last frame’s values:
+        var depth    : f32 = raymarch_depth_out_buffer[idx];
+        var shapeID  : u32 = raymarch_shape_out_buffer[idx];
+        // cheap “rebuild a minimal RayHit from saved depth” path:
+        // (if you only need depth for blending or picking and
+        // don’t care about perfect normals/AO, you can skip those too)
+
+        // reconstruct the world‐space hit point
+        let pos = rayOrigin + rayDir * depth;
+        // approximate normal by tiny finite‐difference
+        hitRes = raymarch(pos, rayDir);
+    }
     // 5) Shade or show background
     var col: vec4<f32>;
     if (hitRes.hit) {
@@ -292,10 +315,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         col = sceneColor;
     }
 
-    // 7) Write depth
-    let idx = fragPx.y * i32(uniforms.iResolution.x) + fragPx.x;
-    raymarch_depth_out_buffer[idx] = hitRes.distance;
-    raymarch_shape_out_buffer[idx] = hitRes.shapeID;
+
 
     // 8) Output
     var out: FragmentOutputs;
@@ -476,7 +496,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     shapePicker.setBuffers(raymarch_shape_out_buffer, hovered_shape_buffer)
   }
 
-  scene.getEngine().onResizeObservable.add(() => {
+  scene?.getEngine().onResizeObservable.add(() => {
     handleResize()
   })
 
@@ -576,6 +596,11 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     effect.setUInt('cameraOrtho', camera.mode === Camera.ORTHOGRAPHIC_CAMERA ? 1 : 0)
     effect.setFloat('camOrthoHalfWidth', (camera.orthoRight - camera.orthoLeft) * 0.5)
     effect.setFloat('camOrthoHalfHeight', (camera.orthoTop - camera.orthoBottom) * 0.5)
+    state.trigger_depth_redraw  =1
+    effect.setUInt(
+    "reuseDepth",
+      state.trigger_depth_redraw ? 0 : 1
+    );
     engine.setStorageBuffer('raymarch_depth_out_buffer', raymarch_depth_out_buffer)
     engine.setStorageBuffer('raymarch_shape_out_buffer', raymarch_shape_out_buffer)
     engine.setStorageBuffer('hovered_shape', hovered_shape_buffer)
@@ -638,7 +663,7 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
         1.0 - scene.pointerY / (canvasHeight * global_settings.display.resolution_multiplier)
       const mouseUV = new Vector2(x, y)
       let picked_id = await shapePicker.pick(mouseUV)
-      if (picked_id != state.selected_shape_id) {
+      if (picked_id != state.selected_shape_id_buffer) {
         if (state.trigger_redraw >= 0) state.trigger_redraw = 10
         state.selected_shape_id_buffer = picked_id
       }
@@ -657,6 +682,36 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     effect._bindTexture('DepthMapTexture', depth_texture.getInternalTexture())
     effect.setTextureFromPostProcess('sceneSampler', scene_copy_pass)
   })
+  state.last_res_multiplier = state.last_res_multiplier || toRef(global_settings.display, 'resolution_multiplier').value
+  watch(
+        toRef(global_settings.display, 'mode'),
+        (newValue, oldValue) => {
 
+          switch (newValue) {
+            case DISPLAY_MODES.poly: {
+              scene.activeCamera?.detachPostProcess(scene_copy_pass) 
+              scene.activeCamera?.detachPostProcess(raymarchPass) 
+              scene.activeCamera?.detachPostProcess(compositePass) 
+              toRef(global_settings.display, 'resolution_multiplier').value = 1
+              break
+            }
+            case DISPLAY_MODES.combined: {
+              scene.activeCamera?.detachPostProcess(scene_copy_pass) 
+              scene.activeCamera?.detachPostProcess(raymarchPass) 
+              scene.activeCamera?.detachPostProcess(compositePass) 
+              scene.activeCamera?.attachPostProcess(scene_copy_pass) 
+              scene.activeCamera?.attachPostProcess(raymarchPass) 
+              scene.activeCamera?.attachPostProcess(compositePass) 
+              toRef(global_settings.display, 'resolution_multiplier').value = state.last_res_multiplier || 3
+              break
+            }
+          
+          
+            default:
+              break;
+          }
+        },
+        { immediate: true },
+      )
   return raymarchPass
 }

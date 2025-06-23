@@ -354,32 +354,63 @@ export function setupEditorView(scene, camera, global_settings, state, sdf_scene
     }),
   )
 
-  watch(
+   watch(
     toRef(state, 'selected_shape_id'),
     (newValue, oldValue) => {
       sdf_scene.onNodeSelectedObservable.notifyObservers([newValue, oldValue])
+      
       gizmoManager.attachToMesh(scene.getMeshByName('node_' + state.selected_shape_id))
     },
     { immediate: true },
   )
+
+
   const canvasEl = engine.getRenderingCanvas()
+  // assume canvasEl, scene, sdf_scene, state, transformState, TransformState, toRef, PointerEventTypes are all in scope
+
+// 1) define your handlers
+function handleCanvasClick() {
+  // ↳ POINTERTAP logic
+  sdf_scene.onNeedsRedrawObservable.notifyObservers(true);
+  if (!transformState.mode) {
+    const ssid = toRef(state, 'selected_shape_id');
+    ssid.value = toRef(state, 'selected_shape_id_buffer').value;
+  }
+  console.log('Transform state cleared due to canvas click');
+  if (transformState.mode) {
+    transformState = new TransformState();
+  }
+  sdf_scene.onNeedsRedrawObservable.notifyObservers(true);
+}
+
+
+// 2) attach to the canvas element
+canvasEl.addEventListener('click', handleCanvasClick);
+
+// 3) remove them when the scene is disposed
+scene.onDisposeObservable.add(() => {
+  canvasEl.removeEventListener('click', handleCanvasClick);
+  canvasEl.removeEventListener('pointerup', handleCanvasPointerUp);
+});
+
   canvasEl.tabIndex = 0
 
-  scene.onPointerObservable.add((pointerInfo) => {
-    if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
-      sdf_scene.onNeedsRedrawObservable.notifyObservers(true)
-      if (!transformState.mode) {
-        state.selected_shape_id = state.selected_shape_id_buffer
-      }
-      console.log('Transform state cleared due to pointer click')
-      if (transformState.mode) {
-        transformState = new TransformState()
-      }
-    }
-    if (pointerInfo.type === PointerEventTypes.POINTERUP) {
-      sdf_scene.onNeedsRedrawObservable.notifyObservers(true)
-    }
-  })
+  // scene.onPointerObservable.add((pointerInfo) => {
+  //   if (pointerInfo.type === PointerEventTypes.POINTERTAP) {
+  //     sdf_scene.onNeedsRedrawObservable.notifyObservers(true)
+  //     if (!transformState.mode) {
+  //       let ssid = toRef(state, 'selected_shape_id')
+  //       ssid.value = toRef(state, 'selected_shape_id_buffer').value
+  //     }
+  //     console.log('Transform state cleared due to pointer click')
+  //     if (transformState.mode) {
+  //       transformState = new TransformState()
+  //     }
+  //   }
+  //   if (pointerInfo.type === PointerEventTypes.POINTERUP) {
+  //     sdf_scene.onNeedsRedrawObservable.notifyObservers(true)
+  //   }
+  // })
 
   // Handle pointer movement in screen space.
   scene.onPointerMove = function (evt) {

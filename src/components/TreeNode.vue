@@ -14,15 +14,27 @@
                         clickable v-close-popup>
                         <q-item-section>Copy scene tree at node</q-item-section>
                     </q-item>
-                    <q-item @click="copyValueToClipboard(getCompiledWgsl(), 'Copied JSON literal to clipboard')"
+                    <q-item @click="copyValueToClipboard(getWgsl(), 'Copied WGSL to clipboard')"
                         clickable v-close-popup>
-                        <q-item-section>[STACK] copy WGSL distance-to-scene function at node</q-item-section>
+                        <q-item-section>[debug] Copy current bytecode executor WGSL</q-item-section>
                     </q-item>
-                    <q-item @click="copyValueToClipboard(node.toWGSL(), 'Copied JSON literal to clipboard')" clickable
+                    <q-item @click="copyValueToClipboard(getCompiledWgsl(), 'Copied WGSL to clipboard')"
+                        clickable v-close-popup>
+                        <q-item-section>[debug] Copy WGSL distance-to-scene function at node</q-item-section>
+                    </q-item>
+                    <q-item @click="copyValueToClipboard(node.toWGSL({with_materials: true}), 'Copied to clipboard')" clickable
+                        v-close-popup>
+                        <q-item-section>[Mat] Copy WGSL distance-to-scene function at node</q-item-section>
+                    </q-item>
+                     <q-item @click="copyValueToClipboard(node.toWGSL({with_materials: false}), 'Copied to clipboard')" clickable
                         v-close-popup>
                         <q-item-section>Copy WGSL distance-to-scene function at node</q-item-section>
                     </q-item>
-                    <q-item @click="copyValueToClipboard(node.toGLSL(), 'Copied JSON literal to clipboard')" clickable
+                    <q-item @click="copyValueToClipboard(node.toGLSL({with_materials: true}), 'Copied to clipboard')" clickable
+                        v-close-popup>
+                        <q-item-section>[Mat] Copy GLSL distance-to-scene function at node</q-item-section>
+                    </q-item>
+                    <q-item @click="copyValueToClipboard(node.toGLSL({with_materials: false}), 'Copied to clipboard')" clickable
                         v-close-popup>
                         <q-item-section>Copy GLSL distance-to-scene function at node</q-item-section>
                     </q-item>
@@ -105,6 +117,9 @@ export default {
     methods: {
         getCompiledWgsl() {
             return generateWGSL(this.node.scene, { compile_static: true })?.code
+        },
+        getWgsl() {
+            return generateWGSL(this.node.scene)?.code
         },
         copyValueToClipboard(key, msg = "Value path copied to clipboard!") {
             copyToClipboard(key)
