@@ -788,7 +788,6 @@ export const FISH = {
   ],
   name: 'Fish',
 }
-
 export const BLOBBY = {
   op: 'opUnion',
   args: {},
@@ -1079,8 +1078,7 @@ export const BLOBBY = {
     },
   ],
 }
-
-export const DEFAULT = {
+export const Tree = {
   op: 'opUnion',
 
   children: [
@@ -1182,3 +1180,981 @@ export const DEFAULT = {
     },
   ],
 }
+
+
+export const Tricolor = {
+  "op": "opUnion",
+  "args": {},
+  "material": {},
+  "modifiers": [],
+  "children": [
+    {
+      "op": "opSmoothUnion",
+      "args": {
+        "k": 0.1
+      },
+      "material": {},
+      "modifiers": [],
+      "children": [
+        {
+          "op": "sdSphere",
+          "args": {
+            "r": 1
+          },
+          "material": {
+            "r": 0,
+            "g": 0.4,
+            "b": 1,
+            "a": 1
+          },
+          "modifiers": [
+            {
+              "op": "opTranslate",
+              "args": {
+                "t": [
+                  -0.009655848145484924,
+                  0.402660608291626,
+                  -0.3629390001296997
+                ]
+              }
+            },
+            {
+              "op": "opRotateY",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateX",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateZ",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opScale",
+              "args": {
+                "s": 1
+              }
+            }
+          ],
+          "children": []
+        },
+        {
+          "op": "sdSphere",
+          "args": {
+            "r": 1
+          },
+          "material": {
+            "r": 0.4666666666666667,
+            "g": 1,
+            "b": 0,
+            "a": 1
+          },
+          "modifiers": [
+            {
+              "op": "opTranslate",
+              "args": {
+                "t": [
+                  -0.20794589817523956,
+                  0.12746268510818481,
+                  -0.4542926251888275
+                ]
+              }
+            },
+            {
+              "op": "opRotateY",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateX",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateZ",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opScale",
+              "args": {
+                "s": 1
+              }
+            }
+          ],
+          "children": []
+        },
+        {
+          "op": "sdSphere",
+          "args": {
+            "r": 1
+          },
+          "material": {
+            "r": 5,
+            "g": 1,
+            "b": 0,
+            "a": 1
+          },
+          "modifiers": [
+            {
+              "op": "opTranslate",
+              "args": {
+                "t": [
+                  0.3639211654663086,
+                  -0.28134238719940186,
+                  0.2776728868484497
+                ]
+              }
+            },
+            {
+              "op": "opRotateY",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateX",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateZ",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opScale",
+              "args": {
+                "s": 1
+              }
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  ]
+}
+
+
+// helper: build a thin capsule between two points
+function capsule(a, b, r= 0.01) {
+  return {
+    op: 'sdCapsule',
+    args: { a, b, r },
+    material: { r: 1, g: 1, b: 1, a: 1 },
+    modifiers: [],
+    children: []
+  };
+}
+
+// raw plus-sign strokes (centered at origin, vertical always Y, horizontal along +X)
+function plusSignStrokes(horizAxis = [1,0,0], r) {
+  return [
+    // vertical stroke along Y
+    capsule([0, -0.2, 0], [0, 0.2, 0], r),
+    // horizontal stroke along horizAxis
+    capsule(
+      [-0.2 * horizAxis[0], -0.2 * horizAxis[1], -0.2 * horizAxis[2]],
+      [ 0.2 * horizAxis[0],  0.2 * horizAxis[1],  0.2 * horizAxis[2]], r
+    )
+  ];
+}
+
+// wrap those into a little group, offset up +Y and out along horizAxis
+function plusGroup(horizAxis = [1,0,0], outOffset = 0.5, r) {
+  return {
+    op: 'opUnion',
+    args: {},
+    material: {},
+    modifiers: [
+      // move up 0.3 in Y, and out along horizAxis by outOffset
+      { op: 'opTranslate', args: { 
+          t: [
+            horizAxis[0] * outOffset,
+            0,
+            horizAxis[2] * outOffset
+          ]
+      }}
+    ],
+    children: plusSignStrokes(horizAxis, r)
+  };
+}
+
+// letter generators in the X–Y plane (all X=0 for letterX, etc)
+
+function letterX(r) {
+  return [
+    // diagonal from bottom‐left to top‐right
+    capsule([-0.2, -0.2, 0], [0.2,  0.2, 0], r),
+    // diagonal from top‐left to bottom‐right
+    capsule([-0.2,  0.2, 0], [0.2, -0.2, 0], r)
+  ];
+}
+
+function letterY(r) {
+  return [
+    capsule([-0.2, 0.2, 0], [0,    0,    0], r),
+    capsule([ 0.2, 0.2, 0], [0,    0,    0], r),
+    capsule([ 0,    0,    0], [0, -0.2,    0], r)
+  ];
+}
+function letterZ(r) {
+  return [
+    capsule([-0.2,  0.2, 0], [0.2,  0.2, 0], r), 
+    capsule([-0.2,  0.2, 0], [0.2, -0.2, 0], r),
+    capsule([-0.2, -0.2, 0], [0.2, -0.2, 0], r)
+  ];
+}
+
+function makeLabel(letterStrokes, translation, horizAxis=[1,0,0], outOffset=0.5, r) {
+  return {
+    op: 'opUnion',
+    args: {},
+    material: {},
+    modifiers: [
+      { op: 'opTranslate', args: { t: translation } }
+    ],
+    children: [
+      plusGroup(horizAxis, outOffset, r),
+      ...letterStrokes
+    ]
+  };
+}
+
+let axis3d_thickness = 0.01
+// final scene
+export const Axis3D = {
+  op: 'opUnion',
+  args: {}, material: {}, modifiers: [],
+  children: [
+    // X axis
+    { op: 'sdCapsule',    args:{ a:[0,0,0], b:[5.5,0,0], r: axis3d_thickness }, material:{r:1,g:0,b:0,a:1}, modifiers:[] },
+    { op: 'sdCappedCone', args:{ a:[5.5,0,0], b:[6,0,0], ra: axis3d_thickness*10, rb:0 }, material:{r:1,g:0,b:0,a:1}, modifiers:[] },
+
+    // Y axis
+    { op: 'sdCapsule',    args:{ a:[0,0,0], b:[0,5.5,0], r: axis3d_thickness }, material:{r:0,g:1,b:0,a:1}, modifiers:[] },
+    { op: 'sdCappedCone', args:{ a:[0,5.5,0], b:[0,6,0], ra: axis3d_thickness*10, rb:0 }, material:{r:0,g:1,b:0,a:1}, modifiers:[] },
+
+    // Z axis
+    { op: 'sdCapsule',    args:{ a:[0,0,0], b:[0,0,5.5], r:axis3d_thickness }, material:{r:0,g:0,b:1,a:1}, modifiers:[] },
+    { op: 'sdCappedCone', args:{ a:[0,0,5.5], b:[0,0,6], ra:axis3d_thickness*10, rb:0 }, material:{r:0,g:0,b:1,a:1}, modifiers:[] },
+    
+    // labels
+    // X+ → horizAxis = Z  (push + out along +Z)
+    makeLabel(letterX(axis3d_thickness), [6.8, 0,   0],undefined,undefined,axis3d_thickness),
+
+    // Y+ → horizAxis = X  (default)
+    makeLabel(letterY(axis3d_thickness), [0,   6.8, 0],undefined,undefined,axis3d_thickness),
+
+    // Z+ → horizAxis = X  (default)
+    makeLabel(letterZ(axis3d_thickness), [0,   0,   6.8],undefined,undefined,axis3d_thickness)
+  ]
+};
+const FishBase2 = {
+  "op": "opUnion",
+  "args": {},
+  "material": {},
+  "modifiers": [],
+  "children": [
+    {
+      "op": "opSubtract",
+      "args": {},
+      "material": {},
+      "modifiers": [],
+      "children": [
+        {
+          "op": "opSmoothUnion",
+          "args": {
+            "k": 1
+          },
+          "material": {},
+          "modifiers": [],
+          "children": [
+            {
+              "op": "sdEllipsoid",
+              "args": {
+                "r": [
+                  0.5,
+                  1,
+                  1.75
+                ]
+              },
+              "material": {
+                "r": 0,
+                "g": 0.4823529411764706,
+                "b": 1,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      -0.0027908431366086006,
+                      -0.0683119148015976,
+                      -0.00003295873466413468
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": []
+            },
+            {
+              "op": "sdEllipsoid",
+              "args": {
+                "r": [
+                  0.25,
+                  0.5,
+                  1
+                ]
+              },
+              "material": {
+                "r": 0,
+                "g": 0.4823529411764706,
+                "b": 1,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      0.013106072321534157,
+                      -0.07577518373727798,
+                      2.08524751663208
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": []
+            },
+            {
+              "op": "sdSphere",
+              "args": {
+                "r": 0.45
+              },
+              "material": {
+                "r": 0,
+                "g": 1,
+                "b": 0.984313725490196,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      -0.05892213061451912,
+                      -0.6236858367919922,
+                      -0.2691953182220459
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": [],
+              "name": "Belly Front"
+            },
+            {
+              "op": "sdSphere",
+              "args": {
+                "r": 0.2
+              },
+              "material": {
+                "r": 0,
+                "g": 1,
+                "b": 0.984313725490196,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      -0.02621185965836048,
+                      -0.6477148532867432,
+                      0.6294463276863098
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": [],
+              "name": "Belly Back"
+            },
+            {
+              "op": "sdSphere",
+              "args": {
+                "r": 0
+              },
+              "material": {
+                "r": 0,
+                "g": 1,
+                "b": 0.984313725490196,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      -0.01693115569651127,
+                      0.2899412214756012,
+                      -2.2830495834350586
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": [],
+              "name": "Beak"
+            }
+          ]
+        },
+        {
+          "op": "sdSphere",
+          "args": {
+            "r": 1
+          },
+          "material": {
+            "r": 0,
+            "g": 1,
+            "b": 0.984313725490196,
+            "a": 1
+          },
+          "modifiers": [
+            {
+              "op": "opTranslate",
+              "args": {
+                "t": [
+                  0.000011705596079991665,
+                  0.34142300486564636,
+                  -2.9632108211517334
+                ]
+              }
+            },
+            {
+              "op": "opRotateY",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateX",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateZ",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opScale",
+              "args": {
+                "s": 1
+              }
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  ]
+}
+
+const FishBase3 = {
+  "op": "opUnion",
+  "args": {},
+  "material": {},
+  "modifiers": [],
+  "children": [
+    {
+      "op": "opSubtract",
+      "args": {},
+      "material": {},
+      "modifiers": [
+        {
+          "op": "opSymmetryX",
+          "args": {}
+        }
+      ],
+      "children": [
+        {
+          "op": "opSmoothUnion",
+          "args": {
+            "k": 1
+          },
+          "material": {},
+          "modifiers": [
+            {
+              "op": "opTransform",
+              "args": {
+                "transform": [
+                  1,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0.3566072881221771,
+                  -0.1025998666882515,
+                  -0.013160989619791508,
+                  1
+                ]
+              }
+            }
+          ],
+          "children": [
+            {
+              "op": "sdEllipsoid",
+              "args": {
+                "r": [
+                  0.5,
+                  1,
+                  1.75
+                ]
+              },
+              "material": {
+                "r": 0,
+                "g": 0.4823529411764706,
+                "b": 1,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      0.1988784819841385,
+                      0.21867316961288452,
+                      -0.07053489983081818
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": []
+            },
+            {
+              "op": "sdEllipsoid",
+              "args": {
+                "r": [
+                  0.25,
+                  0.5,
+                  1
+                ]
+              },
+              "material": {
+                "r": 0,
+                "g": 0.4823529411764706,
+                "b": 1,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      0.011947354301810265,
+                      -0.03429822251200676,
+                      2.227487325668335
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": []
+            },
+            {
+              "op": "sdSphere",
+              "args": {
+                "r": 0.47
+              },
+              "material": {
+                "r": 0,
+                "g": 1,
+                "b": 0.984313725490196,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      0.19775159657001495,
+                      -0.8539676666259766,
+                      -0.1778528243303299
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": [],
+              "name": "Belly Front"
+            },
+            {
+              "op": "sdSphere",
+              "args": {
+                "r": 0.3
+              },
+              "material": {
+                "r": 0,
+                "g": 1,
+                "b": 0.984313725490196,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      0.08792845159769058,
+                      -0.41362181305885315,
+                      0.448496013879776
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": [],
+              "name": "Belly Back"
+            },
+            {
+              "op": "sdSphere",
+              "args": {
+                "r": 0
+              },
+              "material": {
+                "r": 0,
+                "g": 1,
+                "b": 0.984313725490196,
+                "a": 1
+              },
+              "modifiers": [
+                {
+                  "op": "opTranslate",
+                  "args": {
+                    "t": [
+                      -0.01693115569651127,
+                      0.2899412214756012,
+                      -2.2830495834350586
+                    ]
+                  }
+                },
+                {
+                  "op": "opRotateY",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateX",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opRotateZ",
+                  "args": {
+                    "a": 0
+                  }
+                },
+                {
+                  "op": "opScale",
+                  "args": {
+                    "s": 1
+                  }
+                }
+              ],
+              "children": [],
+              "name": "Beak"
+            }
+          ]
+        },
+        {
+          "op": "sdSphere",
+          "args": {
+            "r": 1
+          },
+          "material": {
+            "r": 0,
+            "g": 1,
+            "b": 0.984313725490196,
+            "a": 1
+          },
+          "modifiers": [
+            {
+              "op": "opTranslate",
+              "args": {
+                "t": [
+                  -0.08437824249267578,
+                  0.03830096498131752,
+                  -1.6957718133926392
+                ]
+              }
+            },
+            {
+              "op": "opRotateY",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateX",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opRotateZ",
+              "args": {
+                "a": 0
+              }
+            },
+            {
+              "op": "opScale",
+              "args": {
+                "s": 1
+              }
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  ]
+}
+
+const DEFAULT = FishBase3
+export const SCENES = {FISH, Axis3D, BLOBBY, Tree, Tricolor, DEFAULT, FishBase2}

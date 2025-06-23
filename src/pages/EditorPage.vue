@@ -2,7 +2,7 @@
   <q-page class="relative">
     <q-layout class="fill">
       <EditorOverlay ref="vue_overlay" id="vue_overlay">
-        <canvas id="canvas" ref="canvas" class="fit"></canvas>
+        <canvas id="canvas" ref="canvas" class="fit" style="border-radius:16px;"></canvas>
         <q-resize-observer @resize="onResize" />
       </EditorOverlay>
     </q-layout>
@@ -40,6 +40,8 @@ import { setupRaymarchingPp } from "src/lib/postprocess"
 import { setupSceneGrid } from "src/lib/setup-scene-grid"
 import { SDFScene } from "src/lib/classes"
 import { ReactiveSDFScene } from "src/lib/reactive-classes"
+import {DISPLAY_MODES} from "src/lib/enums.js"
+import { setupMarchingCubes } from "src/lib/marching_cubes"
 
 // 1) ALL REFS & STORE
 const canvas = ref(null)
@@ -55,12 +57,12 @@ const store = useScenesStore()
 // reactive app-level settings & state
 const global_settings = reactive({
   display: {
-    mode: "raymarch",
+    mode: DISPLAY_MODES.combined,
     raymarch: { epsilon: 0.005, adaptive_epsilon: true, max_steps: 70, max_dist: 300 },
     resolution_multiplier: 3,
     show_world_grid: true,
     disable_animations: false,
-    render_only_on_change: true
+    render_only_on_change: false
   }
 })
 const state = reactive({
@@ -82,10 +84,11 @@ function onResize() {
 async function resetBabylon() {
   if (scene.value) await scene.value.dispose()
   if (engine.value) engine.value?.dispose()
-  engine.value = new WebGPUEngine(canvas.value, { antialias: true })
+  engine.value = new WebGPUEngine(canvas.value, { antialias: true, setMaximumLimits:true, enableAllFeatures:true })
   await engine.value.initAsync()
 
   scene.value = new Scene(engine.value)
+  // scene.value.useRightHandedSystem = true
 }
 
 function setupCamera(scene, canvas) {
@@ -99,6 +102,7 @@ function setupCamera(scene, canvas) {
   )
   camera.setTarget(Vector3.Zero())
   camera.attachControl(canvas, true)
+  // camera.wheelPrecision = 50;
 
   camera.onViewMatrixChangedObservable.add(() => {
     state.trigger_redraw = 3
@@ -182,7 +186,8 @@ async function initializeScene() {
 
   setupRaymarchingPp(scene.value, camera, light.direction, sdf, global_settings, state)
   setupEditorView(scene.value, camera, global_settings, state, sdf)
-
+  
+  // setupMarchingCubes(scene.value, sdf, global_settings, state)
   camera.beta = 1.3
   camera.alpha = Tools.ToRadians(135)
   camera.radius = 11
@@ -244,6 +249,7 @@ provide(
   font-family: "Atkinson Hyperlegible Next";
   font-weight: 300;
 }
+
 .fill {
   position: fixed;
   top: 0;
@@ -251,9 +257,11 @@ provide(
   bottom: 0;
   left: 0;
 }
+
 .relative {
   position: relative;
 }
+
 #canvas {
   outline: none;
 }

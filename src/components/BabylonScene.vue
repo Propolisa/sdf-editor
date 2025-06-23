@@ -51,6 +51,8 @@ export default {
       this.engine = new WebGPUEngine(this.canvas, { antialias: true })
       await this.engine.initAsync()
       this.scene = new Scene(this.engine)
+      // this.scene.useRightHandedSystem = true
+      
     }
   }
 }

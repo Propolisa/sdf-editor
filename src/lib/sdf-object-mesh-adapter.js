@@ -1,33 +1,78 @@
-import { SDFScene } from './classes'
-import { BLOBBY } from './scenes'
+import {
+  StandardMaterial,
+  MeshBuilder,
+  Matrix,
+  Quaternion,
+  Vector3,
+  UtilityLayerRenderer,
+  BoundingBoxGizmo,
+  Color3,
+  SixDofDragBehavior,
+  MultiPointerScaleBehavior,
+} from '@babylonjs/core'
 
-// --- Adapter: keeps a Babylon.js scene in sync with an SDFScene ---
+// --- Adapter: keeps a Babylon.js scene in sync with an SDFScene and manages bounding-box gizmos ---
 export class SDFBabylonAdapter {
   /**
    * @param {SDFScene} sdfScene
    * @param {BABYLON.Scene} babylonScene
    */
   constructor(sdfScene, babylonScene) {
+    this.dummy = new MeshBuilder.CreateBox("unattached_pointer", {size:.5}, babylonScene)
+    this.dummy.isVisible = true
     this.sdfScene = sdfScene
     this.babylonScene = babylonScene
-    this.nodeMap = new Map() // maps SDFNode → Babylon Mesh
+    this.nodeMap = new Map() // SDFNode -> Mesh
+    this._gizmoMap = new Map() // SDFNode -> BoundingBoxGizmo
+
+    // // Utility layer for all gizmos
+    // this._utilLayer = new UtilityLayerRenderer(this.babylonScene)
+    // this._utilLayer.setRenderCamera(babylonScene.activeCamera)
+    // this._utilLayer.utilityLayerScene.autoClearDepthAndStencil = false
+
+    // Listen for selection changes to show/hide gizmos
+    // this.sdfScene.onNodeSelectedObservable.add(([newId, oldId]) => {
+    //   const newNode = this._getNodeById(newId)
+    //   const oldNode = this._getNodeById(oldId || 0)
+    //   // Hide gizmo for previously selected node
+    //   if (oldNode && this._gizmoMap.has(oldNode)) {
+    //     this._gizmoMap.get(oldNode).attachedMesh = this.dummy
+    //   }
+    //   // Show gizmo for newly selected node
+    //   if (newNode && this._gizmoMap.has(newNode)) {
+    //     const mesh = this.nodeMap.get(newNode)
+    //     this._gizmoMap.get(newNode).attachedMesh = mesh
+    //   }
+    // })
+
     this.sync()
   }
 
   // Traverses SDF graph to create/remove meshes as needed
   sync() {
-    // Create meshes for new nodes
+    // Create meshes for new nodes, and their gizmos
     this.sdfScene.traverse((node) => {
       if (!this.nodeMap.has(node)) {
         const mesh = this._createMeshFromNode(node)
         this.nodeMap.set(node, mesh)
+
+        // Create a gizmo but don't attach it until selection
+        const gizmo = new BoundingBoxGizmo(Color3.FromHexString('#0984e3'))
+        gizmo.attachedMesh = this.dummy
+        this._gizmoMap.set(node, gizmo)
       }
     })
-    // Dispose meshes whose nodes have been removed
+    // Dispose meshes & gizmos whose nodes have been removed
     for (let [node, mesh] of this.nodeMap) {
       if (!this._nodeStillInScene(node)) {
         mesh.dispose()
         this.nodeMap.delete(node)
+        // also clean up gizmo
+        const g = this._gizmoMap.get(node)
+        if (g) {
+          g.dispose()
+          this._gizmoMap.delete(node)
+        }
       }
     }
   }
@@ -40,8 +85,17 @@ export class SDFBabylonAdapter {
     return found
   }
 
+  _getNodeById(id) {
+    let result = null
+    this.sdfScene.traverse((n) => {
+      if (n.id === id || n.name === id) {
+        result = n
+      }
+    })
+    return result
+  }
+
   _createMeshFromNode(node) {
-    
     // 1) Create a unit cube centered at (0,0,0)
     const mesh = MeshBuilder.CreateBox(
       node.id || node.name || 'bbox',
@@ -50,71 +104,47 @@ export class SDFBabylonAdapter {
     )
     mesh.material = new StandardMaterial()
     mesh.material.alpha = 0
-    mesh.name = node.name || `node_${node.id}`
+    mesh.name = `node_${node.id}`
 
     // 2) Apply any existing SDF modifiers (translate/rotate/scale)
     this._applyModifiersToMesh(node, mesh)
 
-    // 3) SDF→Babylon: re-apply transforms on modifier change
+    // 3) Re-apply transforms on modifier change
     for (let mod of node.modifiers) {
       mod.onChange = () => this._applyModifiersToMesh(node, mesh)
     }
 
-    // 4) Babylon→SDF: update node modifiers after the world matrix changes
+    // 4) Update node modifiers after world-matrix changes
     mesh.registerAfterWorldMatrixUpdate(() => {
-      // 4.1) Extract current TRS from the mesh
       const { x: px, y: py, z: pz } = mesh.position
       const {
         x: rx,
         y: ry,
         z: rz,
       } = mesh.rotationQuaternion ? mesh.rotationQuaternion.toEulerAngles() : mesh.rotation
-      const { x: sx } = mesh.scaling // assume uniform scale
+      const { x: sx } = mesh.scaling
 
-      // 4.2) Determine which primitive ops are actually needed
-      const need = {
-        opTranslate: px !== 0 || py !== 0 || pz !== 0,
-        opRotateX: rx !== 0,
-        opRotateY: ry !== 0,
-        opRotateZ: rz !== 0,
-        opScale: sx !== 1,
+      function almostEquals(val, target, threshold=0.00001){
+        return Math.abs(target - val) < threshold
       }
-
-      // helper to check for existing modifier
+      const need = {
+        opTranslate: !almostEquals(px, 0) || !almostEquals(py, 0)  || !almostEquals(pz, 0) ,
+        opRotateX: !almostEquals(rx, 0),
+        opRotateY: !almostEquals(ry, 0),
+        opRotateZ: !almostEquals(rz, 0),
+        opScale: !almostEquals(sx, 1),
+      }
       const hasMod = (op) => node.modifiers.some((m) => m.op === op)
-
-      // 4.3) If *any* needed primitive is missing, fall back to opTransform
       const missingAny = Object.entries(need).some(([op, needed]) => needed && !hasMod(op))
 
       if (missingAny || hasMod('opTransform')) {
-        // strip out all primitive modifiers
+        // Use full transform matrix
         node.modifiers = node.modifiers.filter(
           (m) => !['opTranslate', 'opRotateX', 'opRotateY', 'opRotateZ', 'opScale'].includes(m.op),
         )
-
-        // compute inverse world matrix and flatten into a 16-array
         const inv = mesh.getWorldMatrix().clone().invert()
-        const M = inv.m // row-major 16-element array
-        const transform = [
-          M[0],
-          M[1],
-          M[2],
-          M[3],
-          M[4],
-          M[5],
-          M[6],
-          M[7],
-          M[8],
-          M[9],
-          M[10],
-          M[11],
-          M[12],
-          M[13],
-          M[14],
-          M[15],
-        ]
-
-        // upsert opTransform
+        const M = inv.m
+        const transform = [...M]
         let tf = node.modifiers.find((m) => m.op === 'opTransform')
         if (tf) {
           tf.args.transform = transform
@@ -122,14 +152,11 @@ export class SDFBabylonAdapter {
           node.modifiers.push({ op: 'opTransform', args: { transform } })
         }
       } else {
-        // all needed primitives exist → update them
         this._writeBackModifier(node, 'opTranslate', [px, py, pz])
         this._writeBackModifier(node, 'opRotateX', rx)
         this._writeBackModifier(node, 'opRotateY', ry)
         this._writeBackModifier(node, 'opRotateZ', rz)
         this._writeBackModifier(node, 'opScale', sx)
-
-        // remove any stale opTransform so it doesn’t override
         node.modifiers = node.modifiers.filter((m) => m.op !== 'opTransform')
       }
     })
@@ -137,90 +164,53 @@ export class SDFBabylonAdapter {
     return mesh
   }
 
-  // Reads all modifiers and applies them to the mesh
   _applyModifiersToMesh(node, mesh) {
     const tfMod = node.modifiers.find((m) => m.op === 'opTransform')
     if (tfMod) {
-      // tfMod.args.transform is a 16-element row-major *inverse* world-matrix
       const invMat = Matrix.FromArray(tfMod.args.transform)
       const worldMat = invMat.clone().invert()
-
-      // prepare mutable holders for decompose
-      const scaling = new Vector3()
-      const rotationQuaternion = new Quaternion()
-      const translation = new Vector3()
-
-      // decompose into S, R, T
+      const scaling = new Vector3(),
+        rotationQuaternion = new Quaternion(),
+        translation = new Vector3()
       worldMat.decompose(scaling, rotationQuaternion, translation)
-
-      // apply to mesh
       mesh.position.copyFrom(translation)
       mesh.scaling.copyFrom(scaling)
       mesh.rotationQuaternion = rotationQuaternion
-
+      mesh.computeWorldMatrix(true)
       return
     }
-
-    // fallback to primitive modifiers
     const get = (op) => node.modifiers.find((m) => m.op === op)?.args
     const t = get('opTranslate')?.t ?? [0, 0, 0]
     const rx = get('opRotateX')?.a ?? 0
     const ry = get('opRotateY')?.a ?? 0
     const rz = get('opRotateZ')?.a ?? 0
-    const sArg = get('opScale')?.s
+    const sArg = get('opScale')?.s ?? 1
     const s = sArg != null ? [sArg, sArg, sArg] : [1, 1, 1]
-
     mesh.position.set(...t)
     mesh.rotation.set(rx, ry, rz)
     mesh.scaling.set(...s)
+    mesh.computeWorldMatrix(true)
   }
 
-  // Finds an existing modifier on the node and writes the new value
   _writeBackModifier(node, op, value) {
-    // 1) find the modifier — if it doesn't exist, do nothing
     const mod = node.modifiers.find((m) => m.op === op)
-    if (!mod) {
-      return
-    }
-
-    // 2) helper to compare numbers or arrays
-    const same = (oldVal, newVal) => {
-      if (Array.isArray(oldVal) && Array.isArray(newVal) && oldVal.length === newVal.length) {
-        return oldVal.every((v, i) => v === newVal[i])
-      }
-      return oldVal === newVal
-    }
-
-    // 3) grab the current stored value
-    let current
-    if (op === 'opTranslate') {
-      current = mod.args.t
-    } else if (op === 'opScale') {
-      // our proxy stores scale as a single number s, but compare as [s]
-      current = mod.args.s
-    } else if (op === 'opRotateY' || op === 'opRotateX' || op === 'opRotateZ') {
-      current = mod.args.a
-    }
-
-    // 4) if nothing changed, bail out
-    if (same(current, value)) {
-      return
-    }
-
-    if (op === 'opTranslate') {
-      mod.args.t = value
-    } else if (op === 'opScale') {
-      mod.args.s = value
-    } else if (op === 'opRotateY' || op === 'opRotateX' || op === 'opRotateZ') {
-      mod.args.a = value
-    }
+    if (!mod) return
+    const same = (oldVal, newVal) =>
+      Array.isArray(oldVal)
+        ? oldVal.length === newVal.length && oldVal.every((v, i) => v === newVal[i])
+        : oldVal === newVal
+    let current = op === 'opTranslate' ? mod.args.t : op === 'opScale' ? mod.args.s : mod.args.a
+    if (same(current, value)) return
+    if (op === 'opTranslate') mod.args.t = value
+    else if (op === 'opScale') mod.args.s = value
+    else mod.args.a = value
   }
 }
 
-import { StandardMaterial, MeshBuilder, Matrix, Quaternion, Vector3 } from '@babylonjs/core'
-// --- Helper to generate both scenes together ---
+import { SDFScene } from './classes'
+import { BLOBBY } from './scenes'
+
 export function generateSceneAndBabylonAdapter(sdfScene, babylonScene) {
   const adapter = new SDFBabylonAdapter(sdfScene, babylonScene)
-  // whenever you add/remove nodes: call adapter.sync()
   return { sdf: sdfScene, adapter }
 }

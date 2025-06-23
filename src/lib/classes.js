@@ -254,6 +254,13 @@ for (const category in SD_LIB) {
   }
 }
 
+function isEqual(a, b) {
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+    return a.every((v, i) => v === b[i])
+  }
+  return a === b
+}
+
 // 2) Your contextual-args sets (copied from your init script)
 const CONTEXTUAL = {
   DISTANCE_FUNCTIONS: new Set(['p']),
@@ -277,14 +284,10 @@ class SDFLibraryFunctionRepr {
     this.name = name
     this.scene = scene
     this.parent = parent
-    this.onChange = () => { this.scene?.onNeedsRedrawObservable.notifyObservers(true)}
+    this.onChange = () => { this.scene?.onNeedsRedrawObservable.notifyObservers(true) }
+    this.onChangeDepth = () => { this.scene?.onNeedsRedrawDepthObservable.notifyObservers(true) }
+    
     this.def = SD_LIB?.[op]
-    const isEqual = (a, b) => {
-      if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
-        return a.every((v, i) => v === b[i])
-      }
-      return a === b
-    }
 
     this.args = new Proxy(
       { ...args },
@@ -306,6 +309,27 @@ class SDFLibraryFunctionRepr {
   patch(path, value) {
     // returns oldValue, serialized if it has a serialize() method
   }
+}
+
+function proxify(inVar, changedCb) {
+  return new Proxy(
+    { ...inVar },
+    {
+      set: (target, prop, value) => {
+        const previous = target[prop]
+        if (isEqual(previous, value)) {
+          // target[prop] = value
+          return true
+        }
+        target[prop] = value
+        if (Array.isArray(changedCb)) { changedCb.forEach(fn => fn(prop, value)) } else {
+          changedCb(prop, value)
+        }
+
+        return true
+      },
+    },
+  )
 }
 
 /*
@@ -343,6 +367,7 @@ export class SDFNode extends SDFLibraryFunctionRepr {
     for (const childConfig of children) {
       this.children.push(new SDFNode(childConfig, scene, this))
     }
+     
   }
 
   /**
@@ -417,7 +442,8 @@ export class SDFNode extends SDFLibraryFunctionRepr {
    * @returns {object}
    */
   serialize(recursive = false) {
-    const cfg = {
+
+    let cfg = {
       op: this.op,
       args: { ...this.args },
       material: { ...this.material },
@@ -428,6 +454,7 @@ export class SDFNode extends SDFLibraryFunctionRepr {
       // only emit children if deep-cloning
       children: [],
     }
+    cfg = JSON.parse(JSON.stringify(cfg))
 
     if (recursive) {
       cfg.children = this.children.map((c) => c.serialize(true))
@@ -442,13 +469,13 @@ export class SDFNode extends SDFLibraryFunctionRepr {
   }
 
   // public entry for GLSL
-  toGLSL() {
-    return this._generateShader('glsl')
+  toGLSL(options) {
+    return this._generateShader('glsl', options)
   }
 
   // reuse for WGSL as well:
-  toWGSL() {
-    return this._generateShader('wgsl')
+  toWGSL(options) {
+    return this._generateShader('wgsl', options)
   }
 
   // inside your SDFNode class…
@@ -457,8 +484,8 @@ export class SDFNode extends SDFLibraryFunctionRepr {
    * Emit a flat, inlined WGSL (or GLSL) sdScene function that
    * exactly matches the bytecode semantics.
    */
-  _generateShader(lang) {
-    return compileScene(this, lang)
+  _generateShader(lang, options) {
+    return compileScene(this, lang, options)
   }
 
   /** Turn a name into a safe WGSL/GLSL identifier. */
@@ -596,6 +623,9 @@ export class SDFScene {
     // Build the actual tree; root will register itself (and its subtree)
     this.root = new SDFNode(sceneJson, this, null)
     this.onNeedsRedrawObservable = new Observable()
+    this.onNeedsRedrawDepthObservable = new Observable()
+    this.selectedNodeId = 0
+    this.onNodeSelectedObservable = new Observable()
   }
 
   // — Adapter API —
